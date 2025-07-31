@@ -1,0 +1,36 @@
+# Audio Analysis Tool - Dependencies
+# Core audio analysis libraries
+librosa>=0.10.0
+numpy>=1.21.0
+scipy>=1.7.0
+soundfile>=0.10.0
+audioread>=2.1.9
+
+# GUI Framework
+PyQt5>=5.15.0
+
+# Data handling
+pandas>=1.3.0
+
+# File handling
+mutagen>=1.45.0
+
+# Export functionality
+lxml>=4.6.0
+
+# Utilities
+PyYAML>=6.0
+requests>=2.25.0
+
+# Development and building
+pyinstaller>=4.5.0
+setuptools>=57.0.0
+wheel>=0.36.0
+
+# Testing (optional)
+pytest>=6.2.0
+pytest-qt>=4.0.0
+
+# Optional: Enhanced audio analysis
+# essentia>=2.1b6.dev1034  # Uncomment if you want to use Essentia
+# madmom>=0.16.1           # Uncomment if you want to use madmom

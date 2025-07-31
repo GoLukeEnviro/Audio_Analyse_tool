@@ -1,0 +1,77 @@
+# Audio Analyse Tool - Standardkonfiguration
+
+# Anwendungseinstellungen
+app:
+  name: "Audio Analyse Tool"
+  version: "1.0.0"
+  window_size: [1200, 800]
+  theme: "dark"
+
+# Audio-Analyse-Einstellungen
+audio_analysis:
+  supported_formats: ["mp3", "wav", "flac", "m4a", "aac"]
+  sample_rate: 44100
+  hop_length: 512
+  frame_size: 2048
+  
+  # Feature-Extraktion
+  features:
+    tempo: true
+    key: true
+    energy: true
+    valence: true
+    danceability: true
+    loudness: true
+    spectral_centroid: true
+    mfcc: true
+
+# Playlist-Generierung
+playlist:
+  # Standard-Regeln
+  default_rules:
+    bpm_tolerance: 5
+    key_compatibility: "camelot"
+    energy_flow: "gradual"
+    max_tracks: 50
+    
+  # Camelot Wheel Einstellungen
+  camelot:
+    perfect_match_weight: 1.0
+    compatible_match_weight: 0.8
+    energy_boost_weight: 0.6
+    
+  # Preset-Stile
+  presets:
+    driving:
+      bpm_range: [128, 140]
+      energy_min: 0.7
+      key_flow: "energetic"
+    dark:
+      bpm_range: [120, 135]
+      valence_max: 0.4
+      energy_range: [0.5, 0.8]
+    euphoric:
+      bpm_range: [130, 145]
+      energy_min: 0.8
+      valence_min: 0.6
+
+# Export-Einstellungen
+export:
+  default_format: "m3u"
+  rekordbox_xml_version: "6.0"
+  include_metadata: true
+  relative_paths: true
+
+# Cache-Einstellungen
+cache:
+  enabled: true
+  directory: "data/cache"
+  max_size_mb: 500
+  cleanup_days: 30
+
+# Logging
+logging:
+  level: "INFO"
+  file: "logs/audio_analyse.log"
+  max_size_mb: 10
+  backup_count: 5
