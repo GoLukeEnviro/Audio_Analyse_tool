@@ -1,0 +1,48 @@
+{
+  "file_path": "F:/Contents/Adam Beyer, Bart Skils/Your Mind (Charles D Epic Mix)/Adam_Beyer,_Bart_Skils_-_Your_Mind_(Charles_.mp3",
+  "filename": "Adam_Beyer,_Bart_Skils_-_Your_Mind_(Charles_.mp3",
+  "features": {
+    "tempo": 0.64599609375,
+    "beat_count": 170,
+    "spectral_centroid": 0.22713215942684584,
+    "spectral_rolloff": 0.49887927501194246,
+    "zero_crossing_rate": 0.06673022763278831,
+    "mfcc_variance": 31.56667724609375,
+    "chroma_mean": 0.5302522778511047,
+    "energy": 0.24797676503658295,
+    "loudness": 1.2018630025621397,
+    "key": 0.36363636363636365,
+    "key_confidence": 0.6801284551620483,
+    "mode": 1.0,
+    "valence": 0.6991907060146332,
+    "danceability": 0.0878251042837898
+  },
+  "metadata": {
+    "file_size": 20279711,
+    "duration": 120.0,
+    "bpm": 129.19921875,
+    "analyzed_at": 1730565016.0
+  },
+  "mood": {
+    "primary_mood": "unknown",
+    "confidence": 0.0,
+    "secondary_moods": [],
+    "explanation": "",
+    "energy_level": 0.24797676503658295,
+    "valence": 0.6991907060146332,
+    "danceability": 0.0878251042837898,
+    "mood_details": {
+      "euphoric": 0.6817057275414766,
+      "dark": 0.6365885449170466,
+      "driving": 1.0,
+      "experimental": 1.0
+    }
+  },
+  "camelot": {
+    "key": "E",
+    "camelot": "12B",
+    "key_confidence": 0.6801284551620483
+  },
+  "errors": [],
+  "version": "2.0"
+}

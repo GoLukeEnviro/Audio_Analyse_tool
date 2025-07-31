@@ -31,6 +31,22 @@ from core.cache_manager import CacheManager
 from core.playlist_engine import PlaylistEngine, PlaylistPreset, PlaylistRule, SortingAlgorithm
 from audio_analysis.analyzer import AudioAnalyzer
 from export.playlist_exporter import PlaylistExporter
+try:
+    from .playlist_dashboard import PlaylistDashboard
+    from .track_browser import TrackBrowser
+    from .settings_dialog import SettingsDialog
+    from .playlist_wizard import PlaylistWizard
+    from .interactive_timeline import InteractiveTimeline
+except ImportError:
+    # Fallback für direkte Ausführung
+    import sys
+    import os
+    sys.path.append(os.path.dirname(__file__))
+    from playlist_dashboard import PlaylistDashboard
+    from track_browser import TrackBrowser
+    from settings_dialog import SettingsDialog
+    from playlist_wizard import PlaylistWizard
+    from interactive_timeline import InteractiveTimeline
 
 logger = logging.getLogger(__name__)
 
@@ -91,6 +107,12 @@ class MainWindow(QMainWindow):
         )
         self.exporter = PlaylistExporter()
         
+        # Erstelle zentrale Widgets
+        self.playlist_dashboard = PlaylistDashboard()
+        self.track_browser = TrackBrowser()
+        self.playlist_wizard = PlaylistWizard()
+        self.interactive_timeline = InteractiveTimeline()
+        
         # Data
         self.analyzed_tracks = []
         self.current_playlist = []
@@ -133,6 +155,13 @@ class MainWindow(QMainWindow):
         
         # Create status bar
         self.create_status_bar()
+        
+        # Toolbar Actions
+        self.create_actions()
+        self.create_toolbar()
+        
+        # Verbinde Signale
+        self.connect_signals()
     
     def create_left_panel(self) -> QWidget:
         """Erstellt das linke Panel"""
@@ -190,6 +219,12 @@ class MainWindow(QMainWindow):
     def create_center_panel(self) -> QWidget:
         """Erstellt das zentrale Panel mit Tabs"""
         self.tab_widget = QTabWidget()
+        
+        # Erweiterte Tabs
+        self.tab_widget.addTab(self.playlist_dashboard, "Playlist Dashboard")
+        self.tab_widget.addTab(self.playlist_wizard, "Playlist Wizard")
+        self.tab_widget.addTab(self.interactive_timeline, "Interactive Timeline")
+        self.tab_widget.addTab(self.track_browser, "Track Browser")
         
         # Tracks tab
         self.tracks_tab = self.create_tracks_tab()
@@ -264,6 +299,45 @@ class MainWindow(QMainWindow):
         about_action = QAction("Über", self)
         about_action.triggered.connect(self.show_about)
         help_menu.addAction(about_action)
+    
+    def create_actions(self):
+        """Erstellt Actions für Menü und Toolbar"""
+        # Datei-Actions
+        self.open_action = QAction("Öffnen", self)
+        self.open_action.setShortcut("Ctrl+O")
+        self.open_action.triggered.connect(self.open_file)
+        
+        self.save_action = QAction("Speichern", self)
+        self.save_action.setShortcut("Ctrl+S")
+        self.save_action.triggered.connect(self.save_file)
+        
+        self.exit_action = QAction("Beenden", self)
+        self.exit_action.setShortcut("Ctrl+Q")
+        self.exit_action.triggered.connect(self.close)
+        
+        # Playlist-Actions
+        self.new_wizard_action = QAction("Neuer Playlist Wizard", self)
+        self.new_wizard_action.setShortcut("Ctrl+N")
+        self.new_wizard_action.triggered.connect(self.start_new_wizard)
+        
+        self.export_action = QAction("Playlist Exportieren", self)
+        self.export_action.setShortcut("Ctrl+E")
+        self.export_action.triggered.connect(self.export_playlist)
+        
+        # Einstellungen
+        self.settings_action = QAction("Einstellungen", self)
+        self.settings_action.triggered.connect(self.show_settings)
+    
+    def create_toolbar(self):
+        """Erstellt Toolbar"""
+        toolbar = self.addToolBar("Main")
+        toolbar.addAction(self.open_action)
+        toolbar.addAction(self.save_action)
+        toolbar.addSeparator()
+        toolbar.addAction(self.new_wizard_action)
+        toolbar.addAction(self.export_action)
+        toolbar.addSeparator()
+        toolbar.addAction(self.settings_action)
     
     def create_status_bar(self):
         """Erstellt die Statusleiste"""
@@ -392,6 +466,50 @@ class MainWindow(QMainWindow):
         self.progress_bar.setValue(0)
         self.progress_label.setText("Analyse abgebrochen")
         self.update_status("Analyse abgebrochen")
+    
+    def connect_signals(self):
+        """Verbindet Signale zwischen Komponenten"""
+        # Playlist Wizard -> Timeline
+        if hasattr(self.playlist_wizard, 'playlist_generated'):
+            self.playlist_wizard.playlist_generated.connect(
+                self.interactive_timeline.load_playlist
+            )
+        
+        # Timeline -> Dashboard
+        if hasattr(self.interactive_timeline, 'playlist_updated'):
+            self.interactive_timeline.playlist_updated.connect(
+                self.playlist_dashboard.update_playlist
+            )
+    
+    def start_new_wizard(self):
+        """Startet neuen Playlist Wizard"""
+        self.tab_widget.setCurrentWidget(self.playlist_wizard)
+        if hasattr(self.playlist_wizard, 'start_wizard'):
+            self.playlist_wizard.start_wizard()
+    
+    def export_playlist(self):
+        """Exportiert aktuelle Playlist"""
+        current_widget = self.tab_widget.currentWidget()
+        
+        if current_widget == self.interactive_timeline:
+            if hasattr(self.interactive_timeline, 'export_playlist'):
+                self.interactive_timeline.export_playlist()
+        elif current_widget == self.playlist_dashboard:
+            if hasattr(self.playlist_dashboard, 'export_current_playlist'):
+                self.playlist_dashboard.export_current_playlist()
+    
+    def open_file(self):
+        """Öffnet Datei"""
+        self.add_files()
+    
+    def save_file(self):
+        """Speichert Datei"""
+        self.export_json()
+    
+    def show_settings(self):
+        """Zeigt Einstellungen-Dialog"""
+        dialog = SettingsDialog(self)
+        dialog.exec()
     
     def update_progress(self, value: int, message: str):
         """Aktualisiert den Fortschrittsbalken"""

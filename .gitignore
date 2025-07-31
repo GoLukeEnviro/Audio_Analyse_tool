@@ -177,3 +177,7 @@ $RECYCLE.BIN/
 # Linux
 *~
 .trae/documents/dj_tool_pro_requirements.md
+.trae/documents/enhanced_playlist_engine_requirements.md
+test_exports/Test_Playlist_metadata.json
+test_exports/Test_Playlist.m3u
+test_exports/Test_Playlist.xml
