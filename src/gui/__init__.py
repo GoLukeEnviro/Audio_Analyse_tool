@@ -1,8 +1,5 @@
-"""GUI Module - Desktop Interface mit PyQt5"""
+"""GUI Module - Desktop Interface mit PySide6"""
 
-from .main_window import AudioAnalyseApp
-from .track_browser import TrackBrowser
-from .playlist_dashboard import PlaylistDashboard
-from .settings_dialog import SettingsDialog
+from .main_window import MainWindow
 
-__all__ = ['AudioAnalyseApp', 'TrackBrowser', 'PlaylistDashboard', '
+__all__ = ['MainWindow']

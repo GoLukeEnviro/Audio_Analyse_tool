@@ -1,36 +1,40 @@
-# Audio Analysis Tool - Dependencies
-# Core audio analysis libraries
-librosa>=0.10.0
-numpy>=1.21.0
-scipy>=1.7.0
-soundfile>=0.10.0
+# DJ Audio-Analyse-Tool Pro - Dependencies
+
+# Core Audio Processing
+essentia==2.1b6.dev1034
+librosa==0.10.1
+soundfile==0.12.1
 audioread>=2.1.9
+mutagen>=1.45.0
+
+# Machine Learning
+lightgbm==4.1.0
+numpy==1.24.3
+scipy==1.11.1
+scikit-learn==1.3.0
 
 # GUI Framework
-PyQt5>=5.15.0
+PySide6==6.6.0
+qtawesome==1.2.3
 
-# Data handling
-pandas>=1.3.0
-
-# File handling
-mutagen>=1.45.0
+# Data Processing
+pandas==2.0.3
+pyyaml==6.0.1
 
 # Export functionality
 lxml>=4.6.0
 
-# Utilities
-PyYAML>=6.0
+# Performance & Utilities
+click==8.1.7
+tqdm==4.66.1
+loguru==0.7.2
 requests>=2.25.0
 
 # Development and building
-pyinstaller>=4.5.0
-setuptools>=57.0.0
-wheel>=0.36.0
+pyinstaller>=5.0.0
+setuptools>=65.0.0
+wheel>=0.38.0
 
-# Testing (optional)
-pytest>=6.2.0
-pytest-qt>=4.0.0
-
-# Optional: Enhanced audio analysis
-# essentia>=2.1b6.dev1034  # Uncomment if you want to use Essentia
-# madmom>=0.16.1           # Uncomment if you want to use madmom
+# Testing
+pytest>=7.0.0
+pytest-qt>=4.2.0

@@ -1,794 +1,637 @@
 import sys
 import os
-import json
-from typing import List, Dict, Optional
 from pathlib import Path
-import threading
-import time
+from typing import List, Dict, Optional
+import json
+import logging
+from datetime import datetime
 
-from PyQt5.QtWidgets import (
+from PySide6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
-    QTabWidget, QTableWidget, QTableWidgetItem, QPushButton, QLabel,
-    QFileDialog, QProgressBar, QTextEdit, QSlider, QComboBox,
-    QSpinBox, QDoubleSpinBox, QGroupBox, QGridLayout, QSplitter,
-    QHeaderView, QAbstractItemView, QMessageBox, QCheckBox,
-    QLineEdit, QFrame, QScrollArea
+    QTabWidget, QTableWidget, QTableWidgetItem, QPushButton,
+    QFileDialog, QProgressBar, QLabel, QTextEdit, QComboBox,
+    QSpinBox, QCheckBox, QGroupBox, QSplitter, QTreeWidget,
+    QTreeWidgetItem, QHeaderView, QMessageBox, QDialog,
+    QDialogButtonBox, QFormLayout, QLineEdit, QSlider,
+    QFrame, QScrollArea, QGridLayout, QButtonGroup, QRadioButton
 )
-from PyQt5.QtCore import Qt, QThread, pyqtSignal, QTimer
-from PyQt5.QtGui import QFont, QPalette, QColor, QIcon
+from PySide6.QtCore import (
+    Qt, QThread, QTimer, Signal, QSettings, QSize, QPoint,
+    QPropertyAnimation, QEasingCurve, QRect
+)
+from PySide6.QtGui import (
+    QIcon, QPixmap, QPainter, QColor, QFont, QAction,
+    QPalette, QLinearGradient, QBrush
+)
 
-# Import our modules
-sys.path.append(os.path.join(os.path.dirname(__file__), '..', '..'))
-from src.audio_analysis.analyzer import AudioAnalyzer
-from src.playlist_engine.generator import PlaylistGenerator
-from src.export.exporter import PlaylistExporter
+# Import core modules
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from core.mood_classifier import HybridClassifier
+from core.cache_manager import CacheManager
+from core.playlist_engine import PlaylistEngine, PlaylistPreset, PlaylistRule, SortingAlgorithm
+from audio_analysis.analyzer import AudioAnalyzer
+from export.playlist_exporter import PlaylistExporter
+
+logger = logging.getLogger(__name__)
 
 class AnalysisWorker(QThread):
-    progress = pyqtSignal(str)
-    finished = pyqtSignal(list)
-    error = pyqtSignal(str)
+    """Worker-Thread für Audio-Analyse"""
+    progress_updated = Signal(int, str)
+    analysis_completed = Signal(dict)
+    error_occurred = Signal(str)
     
-    def __init__(self, directory: str):
+    def __init__(self, file_paths: List[str], analyzer: AudioAnalyzer):
         super().__init__()
-        self.directory = directory
-        self.analyzer = AudioAnalyzer()
+        self.file_paths = file_paths
+        self.analyzer = analyzer
+        self.is_cancelled = False
     
     def run(self):
         try:
-            def progress_callback(message):
-                self.progress.emit(message)
+            total_files = len(self.file_paths)
+            results = []
             
-            results = self.analyzer.analyze_directory(self.directory, progress_callback)
-            self.finished.emit(results)
+            for i, file_path in enumerate(self.file_paths):
+                if self.is_cancelled:
+                    break
+                
+                self.progress_updated.emit(
+                    int((i / total_files) * 100),
+                    f"Analysiere: {os.path.basename(file_path)}"
+                )
+                
+                result = self.analyzer.analyze_track(file_path)
+                results.append(result)
+            
+            if not self.is_cancelled:
+                self.progress_updated.emit(100, "Analyse abgeschlossen")
+                self.analysis_completed.emit({'results': results})
+                
         except Exception as e:
-            self.error.emit(str(e))
+            self.error_occurred.emit(str(e))
+    
+    def cancel(self):
+        self.is_cancelled = True
 
 class MainWindow(QMainWindow):
+    """Hauptfenster der DJ Audio-Analyse-Tool Pro Anwendung"""
+    
     def __init__(self):
         super().__init__()
-        self.tracks = []
-        self.current_playlist = None
-        self.analyzer = AudioAnalyzer()
-        self.playlist_generator = PlaylistGenerator()
+        self.setWindowTitle("DJ Audio-Analyse-Tool Pro v2.0")
+        self.setMinimumSize(1200, 800)
+        
+        # Initialize core components
+        self.cache_manager = CacheManager()
+        self.mood_classifier = HybridClassifier()
+        self.playlist_engine = PlaylistEngine()
+        self.analyzer = AudioAnalyzer(
+            cache_dir="cache",
+            enable_multiprocessing=True
+        )
         self.exporter = PlaylistExporter()
         
-        self.init_ui()
-        self.apply_dark_theme()
-        self.load_cached_tracks()
-    
-    def init_ui(self):
-        self.setWindowTitle('Audio Analysis Tool - DJ Playlist Generator')
-        self.setGeometry(100, 100, 1400, 900)
+        # Data
+        self.analyzed_tracks = []
+        self.current_playlist = []
         
-        # Central widget with tabs
+        # Worker thread
+        self.analysis_worker = None
+        
+        # Settings
+        self.settings = QSettings("DJTool", "AudioAnalyzer")
+        
+        self.setup_ui()
+        self.setup_connections()
+        self.load_settings()
+    
+    def setup_ui(self):
+        """Erstellt die Benutzeroberfläche"""
         central_widget = QWidget()
         self.setCentralWidget(central_widget)
         
-        layout = QVBoxLayout(central_widget)
+        # Main layout
+        main_layout = QHBoxLayout(central_widget)
         
-        # Create tab widget
-        self.tab_widget = QTabWidget()
-        layout.addWidget(self.tab_widget)
+        # Create splitter for resizable panels
+        splitter = QSplitter(Qt.Horizontal)
+        main_layout.addWidget(splitter)
         
-        # Create tabs
-        self.create_dashboard_tab()
-        self.create_analysis_tab()
-        self.create_playlist_tab()
-        self.create_export_tab()
-        self.create_settings_tab()
+        # Left panel - File browser and controls
+        left_panel = self.create_left_panel()
+        splitter.addWidget(left_panel)
+        
+        # Center panel - Main content tabs
+        center_panel = self.create_center_panel()
+        splitter.addWidget(center_panel)
+        
+        # Set splitter proportions
+        splitter.setSizes([300, 900])
+        
+        # Create menu bar
+        self.create_menu_bar()
+        
+        # Create status bar
+        self.create_status_bar()
     
-    def create_dashboard_tab(self):
-        dashboard = QWidget()
-        layout = QVBoxLayout(dashboard)
+    def create_left_panel(self) -> QWidget:
+        """Erstellt das linke Panel"""
+        panel = QWidget()
+        layout = QVBoxLayout(panel)
         
-        # Statistics section
-        stats_group = QGroupBox("Library Statistics")
-        stats_layout = QGridLayout(stats_group)
+        # File operations
+        file_group = QGroupBox("Dateien")
+        file_layout = QVBoxLayout(file_group)
         
-        self.total_tracks_label = QLabel("Total Tracks: 0")
-        self.avg_bpm_label = QLabel("Average BPM: 0")
-        self.total_duration_label = QLabel("Total Duration: 0:00")
+        self.add_files_btn = QPushButton("Dateien hinzufügen")
+        self.add_folder_btn = QPushButton("Ordner hinzufügen")
+        self.clear_files_btn = QPushButton("Liste leeren")
         
-        stats_layout.addWidget(self.total_tracks_label, 0, 0)
-        stats_layout.addWidget(self.avg_bpm_label, 0, 1)
-        stats_layout.addWidget(self.total_duration_label, 0, 2)
+        file_layout.addWidget(self.add_files_btn)
+        file_layout.addWidget(self.add_folder_btn)
+        file_layout.addWidget(self.clear_files_btn)
         
-        layout.addWidget(stats_group)
-        
-        # Track table
-        self.track_table = QTableWidget()
-        self.track_table.setColumnCount(8)
-        self.track_table.setHorizontalHeaderLabels([
-            'Filename', 'BPM', 'Key', 'Camelot', 'Energy', 'Duration', 'Mood', 'Path'
-        ])
-        
-        # Configure table
-        header = self.track_table.horizontalHeader()
-        header.setSectionResizeMode(0, QHeaderView.Stretch)
-        header.setSectionResizeMode(7, QHeaderView.Stretch)
-        
-        self.track_table.setSelectionBehavior(QAbstractItemView.SelectRows)
-        self.track_table.setAlternatingRowColors(True)
-        self.track_table.setSortingEnabled(True)
-        
-        layout.addWidget(self.track_table)
-        
-        # Control buttons
-        button_layout = QHBoxLayout()
-        
-        self.refresh_btn = QPushButton("Refresh Library")
-        self.refresh_btn.clicked.connect(self.refresh_library)
-        
-        self.analyze_folder_btn = QPushButton("Analyze Folder")
-        self.analyze_folder_btn.clicked.connect(self.select_analysis_folder)
-        
-        button_layout.addWidget(self.refresh_btn)
-        button_layout.addWidget(self.analyze_folder_btn)
-        button_layout.addStretch()
-        
-        layout.addLayout(button_layout)
-        
-        self.tab_widget.addTab(dashboard, "Dashboard")
-    
-    def create_analysis_tab(self):
-        analysis = QWidget()
-        layout = QVBoxLayout(analysis)
+        layout.addWidget(file_group)
         
         # Analysis controls
-        controls_group = QGroupBox("Analysis Controls")
-        controls_layout = QHBoxLayout(controls_group)
+        analysis_group = QGroupBox("Analyse")
+        analysis_layout = QVBoxLayout(analysis_group)
         
-        self.select_folder_btn = QPushButton("Select Music Folder")
-        self.select_folder_btn.clicked.connect(self.select_analysis_folder)
-        
-        self.start_analysis_btn = QPushButton("Start Analysis")
-        self.start_analysis_btn.clicked.connect(self.start_analysis)
-        self.start_analysis_btn.setEnabled(False)
-        
-        controls_layout.addWidget(self.select_folder_btn)
-        controls_layout.addWidget(self.start_analysis_btn)
-        controls_layout.addStretch()
-        
-        layout.addWidget(controls_group)
-        
-        # Progress section
-        progress_group = QGroupBox("Analysis Progress")
-        progress_layout = QVBoxLayout(progress_group)
+        self.analyze_btn = QPushButton("Analyse starten")
+        self.cancel_btn = QPushButton("Abbrechen")
+        self.cancel_btn.setEnabled(False)
         
         self.progress_bar = QProgressBar()
-        self.progress_text = QTextEdit()
-        self.progress_text.setMaximumHeight(200)
+        self.progress_label = QLabel("Bereit")
         
-        progress_layout.addWidget(self.progress_bar)
-        progress_layout.addWidget(self.progress_text)
+        analysis_layout.addWidget(self.analyze_btn)
+        analysis_layout.addWidget(self.cancel_btn)
+        analysis_layout.addWidget(self.progress_bar)
+        analysis_layout.addWidget(self.progress_label)
         
-        layout.addWidget(progress_group)
+        layout.addWidget(analysis_group)
         
-        # Results section
-        results_group = QGroupBox("Analysis Results")
-        results_layout = QVBoxLayout(results_group)
+        # Export controls
+        export_group = QGroupBox("Export")
+        export_layout = QVBoxLayout(export_group)
         
-        self.results_table = QTableWidget()
-        self.results_table.setColumnCount(6)
-        self.results_table.setHorizontalHeaderLabels([
-            'Filename', 'Status', 'BPM', 'Key', 'Energy', 'Error'
-        ])
+        self.export_m3u_btn = QPushButton("M3U exportieren")
+        self.export_json_btn = QPushButton("JSON exportieren")
         
-        results_layout.addWidget(self.results_table)
-        layout.addWidget(results_group)
+        export_layout.addWidget(self.export_m3u_btn)
+        export_layout.addWidget(self.export_json_btn)
         
-        self.tab_widget.addTab(analysis, "Analysis Center")
-    
-    def create_playlist_tab(self):
-        playlist = QWidget()
-        layout = QHBoxLayout(playlist)
-        
-        # Left panel - Controls
-        left_panel = QWidget()
-        left_layout = QVBoxLayout(left_panel)
-        left_panel.setMaximumWidth(350)
-        
-        # Preset selection
-        preset_group = QGroupBox("Presets")
-        preset_layout = QVBoxLayout(preset_group)
-        
-        self.preset_combo = QComboBox()
-        self.preset_combo.addItems(['Custom', 'Push-Push', 'Dark', 'Euphoric', 'Experimental', 'Driving'])
-        self.preset_combo.currentTextChanged.connect(self.on_preset_changed)
-        
-        self.load_preset_btn = QPushButton("Load Preset")
-        self.load_preset_btn.clicked.connect(self.load_preset)
-        
-        preset_layout.addWidget(self.preset_combo)
-        preset_layout.addWidget(self.load_preset_btn)
-        
-        left_layout.addWidget(preset_group)
-        
-        # BPM Range
-        bpm_group = QGroupBox("BPM Range")
-        bpm_layout = QGridLayout(bpm_group)
-        
-        bpm_layout.addWidget(QLabel("Min BPM:"), 0, 0)
-        self.bpm_min_spin = QSpinBox()
-        self.bpm_min_spin.setRange(60, 200)
-        self.bpm_min_spin.setValue(120)
-        bpm_layout.addWidget(self.bpm_min_spin, 0, 1)
-        
-        bpm_layout.addWidget(QLabel("Max BPM:"), 1, 0)
-        self.bpm_max_spin = QSpinBox()
-        self.bpm_max_spin.setRange(60, 200)
-        self.bpm_max_spin.setValue(140)
-        bpm_layout.addWidget(self.bpm_max_spin, 1, 1)
-        
-        left_layout.addWidget(bpm_group)
-        
-        # Energy and Mood
-        mood_group = QGroupBox("Mood & Energy")
-        mood_layout = QGridLayout(mood_group)
-        
-        mood_layout.addWidget(QLabel("Min Energy:"), 0, 0)
-        self.energy_slider = QSlider(Qt.Horizontal)
-        self.energy_slider.setRange(0, 100)
-        self.energy_slider.setValue(50)
-        self.energy_label = QLabel("0.5")
-        mood_layout.addWidget(self.energy_slider, 0, 1)
-        mood_layout.addWidget(self.energy_label, 0, 2)
-        
-        self.energy_slider.valueChanged.connect(
-            lambda v: self.energy_label.setText(f"{v/100:.1f}")
-        )
-        
-        # Mood checkboxes
-        self.euphoric_check = QCheckBox("Euphoric")
-        self.dark_check = QCheckBox("Dark")
-        self.driving_check = QCheckBox("Driving")
-        self.experimental_check = QCheckBox("Experimental")
-        
-        mood_layout.addWidget(self.euphoric_check, 1, 0)
-        mood_layout.addWidget(self.dark_check, 1, 1)
-        mood_layout.addWidget(self.driving_check, 2, 0)
-        mood_layout.addWidget(self.experimental_check, 2, 1)
-        
-        left_layout.addWidget(mood_group)
-        
-        # Sorting options
-        sort_group = QGroupBox("Sorting")
-        sort_layout = QVBoxLayout(sort_group)
-        
-        self.sort_combo = QComboBox()
-        self.sort_combo.addItems([
-            'BPM Ascending', 'BPM Descending', 'Energy Ascending', 
-            'Energy Descending', 'Harmonic Flow', 'Dark Mood', 'Euphoric Mood'
-        ])
-        
-        sort_layout.addWidget(self.sort_combo)
-        left_layout.addWidget(sort_group)
-        
-        # Generate button
-        self.generate_btn = QPushButton("Generate Playlist")
-        self.generate_btn.clicked.connect(self.generate_playlist)
-        left_layout.addWidget(self.generate_btn)
-        
-        left_layout.addStretch()
-        
-        # Right panel - Playlist preview
-        right_panel = QWidget()
-        right_layout = QVBoxLayout(right_panel)
-        
-        # Playlist info
-        info_group = QGroupBox("Playlist Information")
-        info_layout = QGridLayout(info_group)
-        
-        self.playlist_tracks_label = QLabel("Tracks: 0")
-        self.playlist_duration_label = QLabel("Duration: 0:00")
-        self.playlist_bpm_label = QLabel("Avg BPM: 0")
-        
-        info_layout.addWidget(self.playlist_tracks_label, 0, 0)
-        info_layout.addWidget(self.playlist_duration_label, 0, 1)
-        info_layout.addWidget(self.playlist_bpm_label, 0, 2)
-        
-        right_layout.addWidget(info_group)
-        
-        # Playlist table
-        self.playlist_table = QTableWidget()
-        self.playlist_table.setColumnCount(7)
-        self.playlist_table.setHorizontalHeaderLabels([
-            'Track', 'BPM', 'Key', 'Camelot', 'Energy', 'Duration', 'Mood Score'
-        ])
-        
-        playlist_header = self.playlist_table.horizontalHeader()
-        playlist_header.setSectionResizeMode(0, QHeaderView.Stretch)
-        
-        right_layout.addWidget(self.playlist_table)
-        
-        # Add panels to splitter
-        splitter = QSplitter(Qt.Horizontal)
-        splitter.addWidget(left_panel)
-        splitter.addWidget(right_panel)
-        splitter.setSizes([350, 1050])
-        
-        layout.addWidget(splitter)
-        
-        self.tab_widget.addTab(playlist, "Playlist Generator")
-    
-    def create_export_tab(self):
-        export = QWidget()
-        layout = QVBoxLayout(export)
-        
-        # Export options
-        options_group = QGroupBox("Export Options")
-        options_layout = QGridLayout(options_group)
-        
-        options_layout.addWidget(QLabel("Format:"), 0, 0)
-        self.format_combo = QComboBox()
-        self.format_combo.addItems(['M3U Playlist', 'Rekordbox XML'])
-        options_layout.addWidget(self.format_combo, 0, 1)
-        
-        options_layout.addWidget(QLabel("Output Directory:"), 1, 0)
-        self.output_path_edit = QLineEdit()
-        self.browse_output_btn = QPushButton("Browse")
-        self.browse_output_btn.clicked.connect(self.browse_output_directory)
-        
-        options_layout.addWidget(self.output_path_edit, 1, 1)
-        options_layout.addWidget(self.browse_output_btn, 1, 2)
-        
-        options_layout.addWidget(QLabel("Playlist Name:"), 2, 0)
-        self.playlist_name_edit = QLineEdit("Generated Playlist")
-        options_layout.addWidget(self.playlist_name_edit, 2, 1)
-        
-        layout.addWidget(options_group)
-        
-        # Export buttons
-        button_layout = QHBoxLayout()
-        
-        self.export_btn = QPushButton("Export Current Playlist")
-        self.export_btn.clicked.connect(self.export_playlist)
-        self.export_btn.setEnabled(False)
-        
-        button_layout.addWidget(self.export_btn)
-        button_layout.addStretch()
-        
-        layout.addLayout(button_layout)
-        
-        # Export log
-        log_group = QGroupBox("Export Log")
-        log_layout = QVBoxLayout(log_group)
-        
-        self.export_log = QTextEdit()
-        self.export_log.setMaximumHeight(200)
-        log_layout.addWidget(self.export_log)
-        
-        layout.addWidget(log_group)
-        layout.addStretch()
-        
-        self.tab_widget.addTab(export, "Export Manager")
-    
-    def create_settings_tab(self):
-        settings = QWidget()
-        layout = QVBoxLayout(settings)
-        
-        # Cache settings
-        cache_group = QGroupBox("Cache Settings")
-        cache_layout = QVBoxLayout(cache_group)
-        
-        cache_info = QLabel(f"Cache Directory: {self.analyzer.cache_dir}")
-        cache_layout.addWidget(cache_info)
-        
-        clear_cache_btn = QPushButton("Clear Analysis Cache")
-        clear_cache_btn.clicked.connect(self.clear_cache)
-        cache_layout.addWidget(clear_cache_btn)
-        
-        layout.addWidget(cache_group)
+        layout.addWidget(export_group)
         
         layout.addStretch()
         
-        self.tab_widget.addTab(settings, "Settings")
+        return panel
     
-    def apply_dark_theme(self):
-        self.setStyleSheet("""
-            QMainWindow {
-                background-color: #1a1a1a;
-                color: #ffffff;
-            }
-            QTabWidget::pane {
-                border: 1px solid #2d2d2d;
-                background-color: #1a1a1a;
-            }
-            QTabBar::tab {
-                background-color: #2d2d2d;
-                color: #ffffff;
-                padding: 8px 16px;
-                margin-right: 2px;
-            }
-            QTabBar::tab:selected {
-                background-color: #0066cc;
-            }
-            QGroupBox {
-                font-weight: bold;
-                border: 2px solid #2d2d2d;
-                border-radius: 4px;
-                margin-top: 1ex;
-                padding-top: 10px;
-            }
-            QGroupBox::title {
-                subcontrol-origin: margin;
-                left: 10px;
-                padding: 0 5px 0 5px;
-            }
-            QPushButton {
-                background-color: #0066cc;
-                color: white;
-                border: none;
-                padding: 8px 16px;
-                border-radius: 4px;
-                font-weight: bold;
-            }
-            QPushButton:hover {
-                background-color: #0080ff;
-            }
-            QPushButton:pressed {
-                background-color: #004499;
-            }
-            QPushButton:disabled {
-                background-color: #666666;
-                color: #999999;
-            }
-            QTableWidget {
-                background-color: #2d2d2d;
-                alternate-background-color: #333333;
-                gridline-color: #555555;
-            }
-            QHeaderView::section {
-                background-color: #0066cc;
-                color: white;
-                padding: 4px;
-                border: 1px solid #555555;
-                font-weight: bold;
-            }
-            QComboBox, QSpinBox, QLineEdit {
-                background-color: #2d2d2d;
-                border: 1px solid #555555;
-                padding: 4px;
-                border-radius: 2px;
-            }
-            QSlider::groove:horizontal {
-                border: 1px solid #555555;
-                height: 8px;
-                background: #2d2d2d;
-                border-radius: 4px;
-            }
-            QSlider::handle:horizontal {
-                background: #0066cc;
-                border: 1px solid #555555;
-                width: 18px;
-                margin: -2px 0;
-                border-radius: 9px;
-            }
-            QProgressBar {
-                border: 1px solid #555555;
-                border-radius: 4px;
-                text-align: center;
-            }
-            QProgressBar::chunk {
-                background-color: #0066cc;
-                border-radius: 4px;
-            }
-        """)
+    def create_center_panel(self) -> QWidget:
+        """Erstellt das zentrale Panel mit Tabs"""
+        self.tab_widget = QTabWidget()
+        
+        # Tracks tab
+        self.tracks_tab = self.create_tracks_tab()
+        self.tab_widget.addTab(self.tracks_tab, "Tracks")
+        
+        # Analysis tab
+        self.analysis_tab = self.create_analysis_tab()
+        self.tab_widget.addTab(self.analysis_tab, "Analyse")
+        
+        return self.tab_widget
     
-    def select_analysis_folder(self):
-        folder = QFileDialog.getExistingDirectory(self, "Select Music Folder")
-        if folder:
-            self.analysis_folder = folder
-            self.start_analysis_btn.setEnabled(True)
-            self.progress_text.append(f"Selected folder: {folder}")
+    def create_tracks_tab(self) -> QWidget:
+        """Erstellt den Tracks-Tab"""
+        widget = QWidget()
+        layout = QVBoxLayout(widget)
+        
+        # Tracks table
+        self.tracks_table = QTableWidget()
+        self.tracks_table.setColumnCount(8)
+        self.tracks_table.setHorizontalHeaderLabels([
+            "Dateiname", "BPM", "Key", "Camelot", "Energie", "Stimmung", "Dauer", "Status"
+        ])
+        
+        header = self.tracks_table.horizontalHeader()
+        header.setStretchLastSection(True)
+        header.setSectionResizeMode(0, QHeaderView.Stretch)
+        
+        self.tracks_table.setSelectionBehavior(QTableWidget.SelectRows)
+        self.tracks_table.setAlternatingRowColors(True)
+        
+        layout.addWidget(self.tracks_table)
+        
+        return widget
     
-    def start_analysis(self):
-        if not hasattr(self, 'analysis_folder'):
-            return
+    def create_analysis_tab(self) -> QWidget:
+        """Erstellt den Analyse-Tab"""
+        widget = QWidget()
+        layout = QVBoxLayout(widget)
         
-        self.start_analysis_btn.setEnabled(False)
-        self.progress_bar.setValue(0)
-        self.progress_text.clear()
+        # Analysis details
+        self.analysis_text = QTextEdit()
+        self.analysis_text.setReadOnly(True)
+        self.analysis_text.setPlainText("Wählen Sie einen Track aus der Tracks-Tabelle aus, um Details zu sehen.")
         
-        self.analysis_worker = AnalysisWorker(self.analysis_folder)
-        self.analysis_worker.progress.connect(self.update_analysis_progress)
-        self.analysis_worker.finished.connect(self.analysis_finished)
-        self.analysis_worker.error.connect(self.analysis_error)
-        self.analysis_worker.start()
+        layout.addWidget(QLabel("Analyse-Details:"))
+        layout.addWidget(self.analysis_text)
+        
+        return widget
     
-    def update_analysis_progress(self, message):
-        self.progress_text.append(message)
-        # Scroll to bottom
-        cursor = self.progress_text.textCursor()
-        cursor.movePosition(cursor.End)
-        self.progress_text.setTextCursor(cursor)
+    def create_menu_bar(self):
+        """Erstellt die Menüleiste"""
+        menubar = self.menuBar()
+        
+        # File menu
+        file_menu = menubar.addMenu("Datei")
+        
+        open_action = QAction("Dateien öffnen", self)
+        open_action.setShortcut("Ctrl+O")
+        open_action.triggered.connect(self.add_files)
+        file_menu.addAction(open_action)
+        
+        file_menu.addSeparator()
+        
+        exit_action = QAction("Beenden", self)
+        exit_action.setShortcut("Ctrl+Q")
+        exit_action.triggered.connect(self.close)
+        file_menu.addAction(exit_action)
+        
+        # Help menu
+        help_menu = menubar.addMenu("Hilfe")
+        
+        about_action = QAction("Über", self)
+        about_action.triggered.connect(self.show_about)
+        help_menu.addAction(about_action)
     
-    def analysis_finished(self, results):
-        self.tracks.extend(results)
-        self.update_track_table()
-        self.update_results_table(results)
-        self.update_statistics()
-        self.start_analysis_btn.setEnabled(True)
-        self.progress_text.append(f"\nAnalysis completed! Processed {len(results)} files.")
-        
-        # Save tracks to cache
-        self.save_tracks_cache()
+    def create_status_bar(self):
+        """Erstellt die Statusleiste"""
+        self.status_bar = self.statusBar()
+        self.status_bar.showMessage("Bereit")
     
-    def analysis_error(self, error_message):
-        self.progress_text.append(f"Error: {error_message}")
-        self.start_analysis_btn.setEnabled(True)
-    
-    def update_track_table(self):
-        self.track_table.setRowCount(len(self.tracks))
+    def setup_connections(self):
+        """Verbindet Signale und Slots"""
+        # File operations
+        self.add_files_btn.clicked.connect(self.add_files)
+        self.add_folder_btn.clicked.connect(self.add_folder)
+        self.clear_files_btn.clicked.connect(self.clear_files)
         
-        for row, track in enumerate(self.tracks):
-            if 'error' in track:
-                continue
-            
-            self.track_table.setItem(row, 0, QTableWidgetItem(track.get('filename', '')))
-            self.track_table.setItem(row, 1, QTableWidgetItem(f"{track.get('bpm', 0):.1f}"))
-            self.track_table.setItem(row, 2, QTableWidgetItem(track.get('key', '')))
-            self.track_table.setItem(row, 3, QTableWidgetItem(track.get('camelot', '')))
-            self.track_table.setItem(row, 4, QTableWidgetItem(f"{track.get('energy', 0):.2f}"))
-            
-            duration = track.get('duration', 0)
-            duration_str = f"{int(duration//60)}:{int(duration%60):02d}"
-            self.track_table.setItem(row, 5, QTableWidgetItem(duration_str))
-            
-            mood = track.get('mood', {})
-            dominant_mood = max(mood.items(), key=lambda x: x[1])[0] if mood else 'Unknown'
-            self.track_table.setItem(row, 6, QTableWidgetItem(dominant_mood))
-            
-            self.track_table.setItem(row, 7, QTableWidgetItem(track.get('file_path', '')))
-    
-    def update_results_table(self, results):
-        self.results_table.setRowCount(len(results))
-        
-        for row, track in enumerate(results):
-            self.results_table.setItem(row, 0, QTableWidgetItem(track.get('filename', '')))
-            
-            if 'error' in track:
-                self.results_table.setItem(row, 1, QTableWidgetItem('Error'))
-                self.results_table.setItem(row, 5, QTableWidgetItem(track['error']))
-            else:
-                self.results_table.setItem(row, 1, QTableWidgetItem('Success'))
-                self.results_table.setItem(row, 2, QTableWidgetItem(f"{track.get('bpm', 0):.1f}"))
-                self.results_table.setItem(row, 3, QTableWidgetItem(track.get('key', '')))
-                self.results_table.setItem(row, 4, QTableWidgetItem(f"{track.get('energy', 0):.2f}"))
-    
-    def update_statistics(self):
-        valid_tracks = [t for t in self.tracks if 'error' not in t]
-        
-        total_tracks = len(valid_tracks)
-        avg_bpm = sum(t.get('bpm', 0) for t in valid_tracks) / total_tracks if total_tracks > 0 else 0
-        total_duration = sum(t.get('duration', 0) for t in valid_tracks)
-        
-        self.total_tracks_label.setText(f"Total Tracks: {total_tracks}")
-        self.avg_bpm_label.setText(f"Average BPM: {avg_bpm:.1f}")
-        
-        hours = int(total_duration // 3600)
-        minutes = int((total_duration % 3600) // 60)
-        self.total_duration_label.setText(f"Total Duration: {hours}:{minutes:02d}")
-    
-    def on_preset_changed(self, preset_name):
-        if preset_name == 'Custom':
-            return
-        
-        presets = self.playlist_generator.presets
-        if preset_name.lower().replace('-', '_') in presets:
-            self.load_preset()
-    
-    def load_preset(self):
-        preset_name = self.preset_combo.currentText()
-        if preset_name == 'Custom':
-            return
-        
-        preset_key = preset_name.lower().replace('-', '_')
-        presets = self.playlist_generator.presets
-        
-        if preset_key in presets:
-            preset = presets[preset_key]
-            
-            # Update UI with preset values
-            self.bpm_min_spin.setValue(preset['bpm_range'][0])
-            self.bpm_max_spin.setValue(preset['bpm_range'][1])
-            self.energy_slider.setValue(int(preset['energy_min'] * 100))
-            
-            # Update mood checkboxes
-            mood_weights = preset['mood_weights']
-            self.euphoric_check.setChecked(mood_weights.get('euphoric', 0) > 0.5)
-            self.dark_check.setChecked(mood_weights.get('dark', 0) > 0.5)
-            self.driving_check.setChecked(mood_weights.get('driving', 0) > 0.5)
-            self.experimental_check.setChecked(mood_weights.get('experimental', 0) > 0.5)
-            
-            # Update sort method
-            sort_mapping = {
-                'bpm_ascending': 'BPM Ascending',
-                'energy_ascending': 'Energy Ascending',
-                'mood_dark': 'Dark Mood',
-                'experimental': 'Experimental'
-            }
-            sort_text = sort_mapping.get(preset['sort_by'], 'BPM Ascending')
-            index = self.sort_combo.findText(sort_text)
-            if index >= 0:
-                self.sort_combo.setCurrentIndex(index)
-    
-    def generate_playlist(self):
-        if not self.tracks:
-            QMessageBox.warning(self, "Warning", "No tracks available. Please analyze some music first.")
-            return
-        
-        # Build rules from UI
-        rules = {
-            'bpm_min': self.bpm_min_spin.value(),
-            'bpm_max': self.bpm_max_spin.value(),
-            'energy_min': self.energy_slider.value() / 100.0,
-            'mood_weights': {},
-            'mood_threshold': 0.3
-        }
-        
-        # Add mood weights based on checkboxes
-        if self.euphoric_check.isChecked():
-            rules['mood_weights']['euphoric'] = 0.8
-        if self.dark_check.isChecked():
-            rules['mood_weights']['dark'] = 0.8
-        if self.driving_check.isChecked():
-            rules['mood_weights']['driving'] = 0.8
-        if self.experimental_check.isChecked():
-            rules['mood_weights']['experimental'] = 0.8
-        
-        # Map sort method
-        sort_mapping = {
-            'BPM Ascending': 'bpm_ascending',
-            'BPM Descending': 'bpm_descending',
-            'Energy Ascending': 'energy_ascending',
-            'Energy Descending': 'energy_descending',
-            'Harmonic Flow': 'harmonic_flow',
-            'Dark Mood': 'mood_dark',
-            'Euphoric Mood': 'mood_euphoric'
-        }
-        rules['sort_by'] = sort_mapping.get(self.sort_combo.currentText(), 'bpm_ascending')
-        
-        # Generate playlist
-        self.current_playlist = self.playlist_generator.generate_playlist(self.tracks, rules)
-        
-        if 'error' in self.current_playlist:
-            QMessageBox.warning(self, "Warning", self.current_playlist['error'])
-            return
-        
-        # Update playlist table
-        self.update_playlist_table()
-        self.export_btn.setEnabled(True)
-    
-    def update_playlist_table(self):
-        if not self.current_playlist:
-            return
-        
-        tracks = self.current_playlist['tracks']
-        self.playlist_table.setRowCount(len(tracks))
-        
-        for row, track in enumerate(tracks):
-            filename = os.path.splitext(track.get('filename', ''))[0]
-            self.playlist_table.setItem(row, 0, QTableWidgetItem(filename))
-            self.playlist_table.setItem(row, 1, QTableWidgetItem(f"{track.get('bpm', 0):.1f}"))
-            self.playlist_table.setItem(row, 2, QTableWidgetItem(track.get('key', '')))
-            self.playlist_table.setItem(row, 3, QTableWidgetItem(track.get('camelot', '')))
-            self.playlist_table.setItem(row, 4, QTableWidgetItem(f"{track.get('energy', 0):.2f}"))
-            
-            duration = track.get('duration', 0)
-            duration_str = f"{int(duration//60)}:{int(duration%60):02d}"
-            self.playlist_table.setItem(row, 5, QTableWidgetItem(duration_str))
-            
-            # Calculate mood score
-            mood = track.get('mood', {})
-            mood_score = sum(mood.values()) / len(mood) if mood else 0
-            self.playlist_table.setItem(row, 6, QTableWidgetItem(f"{mood_score:.2f}"))
-        
-        # Update playlist info
-        total_tracks = self.current_playlist['total_tracks']
-        total_duration = self.current_playlist['total_duration']
-        avg_bpm = self.current_playlist['avg_bpm']
-        
-        self.playlist_tracks_label.setText(f"Tracks: {total_tracks}")
-        
-        hours = int(total_duration // 3600)
-        minutes = int((total_duration % 3600) // 60)
-        self.playlist_duration_label.setText(f"Duration: {hours}:{minutes:02d}")
-        
-        self.playlist_bpm_label.setText(f"Avg BPM: {avg_bpm:.1f}")
-    
-    def browse_output_directory(self):
-        directory = QFileDialog.getExistingDirectory(self, "Select Output Directory")
-        if directory:
-            self.output_path_edit.setText(directory)
-    
-    def export_playlist(self):
-        if not self.current_playlist:
-            QMessageBox.warning(self, "Warning", "No playlist to export. Please generate a playlist first.")
-            return
-        
-        output_dir = self.output_path_edit.text()
-        if not output_dir:
-            QMessageBox.warning(self, "Warning", "Please select an output directory.")
-            return
-        
-        playlist_name = self.playlist_name_edit.text() or "Generated Playlist"
-        format_type = 'm3u' if 'M3U' in self.format_combo.currentText() else 'rekordbox_xml'
-        
-        # Prepare playlist data
-        export_playlist = self.current_playlist.copy()
-        export_playlist['name'] = playlist_name
-        
-        # Generate filename
-        safe_name = self.exporter._sanitize_filename(playlist_name)
-        if format_type == 'm3u':
-            output_file = os.path.join(output_dir, f"{safe_name}.m3u")
-        else:
-            output_file = os.path.join(output_dir, f"{safe_name}.xml")
+        # Analysis
+        self.analyze_btn.clicked.connect(self.start_analysis)
+        self.cancel_btn.clicked.connect(self.cancel_analysis)
         
         # Export
-        success = self.exporter.export_playlist(export_playlist, output_file, format_type)
+        self.export_m3u_btn.clicked.connect(self.export_m3u)
+        self.export_json_btn.clicked.connect(self.export_json)
         
-        if success:
-            self.export_log.append(f"Successfully exported '{playlist_name}' to {output_file}")
-            QMessageBox.information(self, "Success", f"Playlist exported successfully to:\n{output_file}")
-        else:
-            self.export_log.append(f"Failed to export '{playlist_name}'")
-            QMessageBox.critical(self, "Error", "Failed to export playlist.")
+        # Table selections
+        self.tracks_table.itemSelectionChanged.connect(self.on_track_selected)
     
-    def refresh_library(self):
-        self.load_cached_tracks()
-        self.update_track_table()
-        self.update_statistics()
-    
-    def clear_cache(self):
-        reply = QMessageBox.question(self, "Clear Cache", 
-                                   "Are you sure you want to clear the analysis cache?\n"
-                                   "This will remove all cached analysis results.",
-                                   QMessageBox.Yes | QMessageBox.No)
+    def add_files(self):
+        """Fügt Audio-Dateien hinzu"""
+        file_dialog = QFileDialog(self)
+        file_dialog.setFileMode(QFileDialog.ExistingFiles)
+        file_dialog.setNameFilter(
+            "Audio Files (*.mp3 *.wav *.flac *.aac *.ogg *.m4a);;All Files (*)"
+        )
         
-        if reply == QMessageBox.Yes:
-            try:
-                import shutil
-                if self.analyzer.cache_dir.exists():
-                    shutil.rmtree(self.analyzer.cache_dir)
-                    self.analyzer.cache_dir.mkdir(parents=True, exist_ok=True)
-                
-                self.tracks.clear()
-                self.update_track_table()
-                self.update_statistics()
-                
-                QMessageBox.information(self, "Success", "Cache cleared successfully.")
-            except Exception as e:
-                QMessageBox.critical(self, "Error", f"Failed to clear cache: {e}")
+        if file_dialog.exec():
+            files = file_dialog.selectedFiles()
+            self.add_files_to_table(files)
     
-    def save_tracks_cache(self):
-        try:
-            cache_file = Path("data/tracks_cache.json")
-            cache_file.parent.mkdir(parents=True, exist_ok=True)
+    def add_folder(self):
+        """Fügt alle Audio-Dateien aus einem Ordner hinzu"""
+        folder = QFileDialog.getExistingDirectory(self, "Ordner auswählen")
+        
+        if folder:
+            audio_extensions = ['.mp3', '.wav', '.flac', '.aac', '.ogg', '.m4a']
+            files = []
             
-            with open(cache_file, 'w') as f:
-                json.dump(self.tracks, f, indent=2)
-        except Exception:
-            pass
+            for root, dirs, filenames in os.walk(folder):
+                for filename in filenames:
+                    if any(filename.lower().endswith(ext) for ext in audio_extensions):
+                        files.append(os.path.join(root, filename))
+            
+            if files:
+                self.add_files_to_table(files)
+            else:
+                QMessageBox.information(self, "Keine Dateien", "Keine Audio-Dateien im ausgewählten Ordner gefunden.")
     
-    def load_cached_tracks(self):
-        try:
-            cache_file = Path("data/tracks_cache.json")
-            if cache_file.exists():
-                with open(cache_file, 'r') as f:
-                    self.tracks = json.load(f)
-        except Exception:
-            self.tracks = []
+    def add_files_to_table(self, files: List[str]):
+        """Fügt Dateien zur Tracks-Tabelle hinzu"""
+        current_row = self.tracks_table.rowCount()
+        
+        for file_path in files:
+            # Prüfe ob Datei bereits vorhanden
+            already_exists = False
+            for row in range(self.tracks_table.rowCount()):
+                if self.tracks_table.item(row, 0).data(Qt.UserRole) == file_path:
+                    already_exists = True
+                    break
+            
+            if already_exists:
+                continue
+            
+            self.tracks_table.insertRow(current_row)
+            
+            filename_item = QTableWidgetItem(os.path.basename(file_path))
+            filename_item.setData(Qt.UserRole, file_path)
+            self.tracks_table.setItem(current_row, 0, filename_item)
+            
+            # Placeholder values
+            for col in range(1, 8):
+                self.tracks_table.setItem(current_row, col, QTableWidgetItem("-"))
+            
+            self.tracks_table.setItem(current_row, 7, QTableWidgetItem("Nicht analysiert"))
+            
+            current_row += 1
+        
+        self.update_status(f"{self.tracks_table.rowCount()} Dateien geladen")
+    
+    def clear_files(self):
+        """Leert die Dateiliste"""
+        self.tracks_table.setRowCount(0)
+        self.analyzed_tracks.clear()
+        self.update_status("Dateiliste geleert")
+    
+    def start_analysis(self):
+        """Startet die Audio-Analyse"""
+        if self.tracks_table.rowCount() == 0:
+            QMessageBox.warning(self, "Keine Dateien", "Bitte fügen Sie zuerst Audio-Dateien hinzu.")
+            return
+        
+        # Sammle Dateipfade
+        file_paths = []
+        for row in range(self.tracks_table.rowCount()):
+            file_path = self.tracks_table.item(row, 0).data(Qt.UserRole)
+            file_paths.append(file_path)
+        
+        # Starte Worker-Thread
+        self.analysis_worker = AnalysisWorker(file_paths, self.analyzer)
+        self.analysis_worker.progress_updated.connect(self.update_progress)
+        self.analysis_worker.analysis_completed.connect(self.on_analysis_completed)
+        self.analysis_worker.error_occurred.connect(self.on_analysis_error)
+        
+        self.analysis_worker.start()
+        
+        # UI-Status aktualisieren
+        self.analyze_btn.setEnabled(False)
+        self.cancel_btn.setEnabled(True)
+        self.progress_bar.setValue(0)
+        self.update_status("Analyse läuft...")
+    
+    def cancel_analysis(self):
+        """Bricht die laufende Analyse ab"""
+        if self.analysis_worker:
+            self.analysis_worker.cancel()
+            self.analysis_worker.wait()
+        
+        self.analyze_btn.setEnabled(True)
+        self.cancel_btn.setEnabled(False)
+        self.progress_bar.setValue(0)
+        self.progress_label.setText("Analyse abgebrochen")
+        self.update_status("Analyse abgebrochen")
+    
+    def update_progress(self, value: int, message: str):
+        """Aktualisiert den Fortschrittsbalken"""
+        self.progress_bar.setValue(value)
+        self.progress_label.setText(message)
+    
+    def on_analysis_completed(self, data: Dict):
+        """Wird aufgerufen wenn die Analyse abgeschlossen ist"""
+        results = data.get('results', [])
+        self.analyzed_tracks = results
+        
+        # Aktualisiere Tracks-Tabelle
+        for i, result in enumerate(results):
+            if i < self.tracks_table.rowCount():
+                self.update_track_row(i, result)
+        
+        # UI-Status zurücksetzen
+        self.analyze_btn.setEnabled(True)
+        self.cancel_btn.setEnabled(False)
+        self.progress_bar.setValue(100)
+        self.progress_label.setText("Analyse abgeschlossen")
+        
+        self.update_status(f"Analyse von {len(results)} Tracks abgeschlossen")
+    
+    def on_analysis_error(self, error_message: str):
+        """Wird bei Analyse-Fehlern aufgerufen"""
+        QMessageBox.critical(self, "Analyse-Fehler", f"Fehler bei der Analyse:\n{error_message}")
+        
+        self.analyze_btn.setEnabled(True)
+        self.cancel_btn.setEnabled(False)
+        self.progress_bar.setValue(0)
+        self.progress_label.setText("Fehler")
+        self.update_status("Analyse-Fehler")
+    
+    def update_track_row(self, row: int, result: Dict):
+        """Aktualisiert eine Zeile in der Tracks-Tabelle"""
+        features = result.get('features', {})
+        metadata = result.get('metadata', {})
+        mood = result.get('mood', {})
+        camelot = result.get('camelot', {})
+        
+        # BPM
+        bpm = features.get('tempo', 0.0) * 200  # Rückkonvertierung
+        self.tracks_table.setItem(row, 1, QTableWidgetItem(f"{bpm:.0f}"))
+        
+        # Key
+        key = camelot.get('key', 'Unknown')
+        self.tracks_table.setItem(row, 2, QTableWidgetItem(key))
+        
+        # Camelot
+        camelot_key = camelot.get('camelot', '-')
+        self.tracks_table.setItem(row, 3, QTableWidgetItem(camelot_key))
+        
+        # Energy
+        energy = features.get('energy', 0.0)
+        self.tracks_table.setItem(row, 4, QTableWidgetItem(f"{energy:.2f}"))
+        
+        # Mood
+        primary_mood = mood.get('primary_mood', 'Unknown')
+        self.tracks_table.setItem(row, 5, QTableWidgetItem(primary_mood))
+        
+        # Duration
+        duration = metadata.get('duration', 0)
+        duration_str = f"{int(duration // 60)}:{int(duration % 60):02d}"
+        self.tracks_table.setItem(row, 6, QTableWidgetItem(duration_str))
+        
+        # Status
+        status = "Analysiert" if not result.get('errors') else "Fehler"
+        self.tracks_table.setItem(row, 7, QTableWidgetItem(status))
+    
+    def on_track_selected(self):
+        """Wird aufgerufen wenn ein Track ausgewählt wird"""
+        current_row = self.tracks_table.currentRow()
+        
+        if current_row >= 0 and current_row < len(self.analyzed_tracks):
+            result = self.analyzed_tracks[current_row]
+            self.show_track_details(result)
+    
+    def show_track_details(self, result: Dict):
+        """Zeigt Track-Details im Analyse-Tab"""
+        details = []
+        details.append(f"Datei: {result.get('filename', 'Unknown')}")
+        details.append(f"Analysiert: {result.get('analysis_timestamp', 'Unknown')}")
+        details.append("")
+        
+        # Features
+        features = result.get('features', {})
+        details.append("Audio-Features:")
+        for key, value in features.items():
+            if isinstance(value, float):
+                details.append(f"  {key}: {value:.3f}")
+            else:
+                details.append(f"  {key}: {value}")
+        
+        details.append("")
+        
+        # Mood
+        mood = result.get('mood', {})
+        if mood:
+            details.append("Stimmungs-Analyse:")
+            details.append(f"  Primäre Stimmung: {mood.get('primary_mood', 'Unknown')}")
+            details.append(f"  Konfidenz: {mood.get('confidence', 0.0):.2f}")
+            details.append(f"  Energie-Level: {mood.get('energy_level', 0.0):.2f}")
+            details.append(f"  Valence: {mood.get('valence', 0.0):.2f}")
+            details.append(f"  Danceability: {mood.get('danceability', 0.0):.2f}")
+        
+        details.append("")
+        
+        # Camelot
+        camelot = result.get('camelot', {})
+        if camelot:
+            details.append("Harmonische Analyse:")
+            details.append(f"  Key: {camelot.get('key', 'Unknown')}")
+            details.append(f"  Camelot: {camelot.get('camelot', 'Unknown')}")
+            details.append(f"  Kompatible Keys: {', '.join(camelot.get('compatible_keys', []))}")
+        
+        # Errors
+        errors = result.get('errors', [])
+        if errors:
+            details.append("")
+            details.append("Fehler:")
+            for error in errors:
+                details.append(f"  {error}")
+        
+        self.analysis_text.setPlainText("\n".join(details))
+    
+    def export_m3u(self):
+        """Exportiert die Playlist als M3U"""
+        if not self.analyzed_tracks:
+            QMessageBox.warning(self, "Keine Daten", "Bitte analysieren Sie zuerst einige Tracks.")
+            return
+        
+        file_path, _ = QFileDialog.getSaveFileName(
+            self, "M3U Playlist speichern", "", "M3U Files (*.m3u);;All Files (*)"
+        )
+        
+        if file_path:
+            try:
+                success = self.exporter.export_m3u(self.analyzed_tracks, file_path)
+                if success:
+                    QMessageBox.information(self, "Export erfolgreich", f"Playlist wurde als M3U exportiert:\n{file_path}")
+                else:
+                    QMessageBox.critical(self, "Export-Fehler", "Playlist konnte nicht exportiert werden.")
+            except Exception as e:
+                QMessageBox.critical(self, "Export-Fehler", f"Fehler beim Export:\n{str(e)}")
+    
+    def export_json(self):
+        """Exportiert die Analyse-Daten als JSON"""
+        if not self.analyzed_tracks:
+            QMessageBox.warning(self, "Keine Daten", "Bitte analysieren Sie zuerst einige Tracks.")
+            return
+        
+        file_path, _ = QFileDialog.getSaveFileName(
+            self, "JSON Daten speichern", "", "JSON Files (*.json);;All Files (*)"
+        )
+        
+        if file_path:
+            try:
+                export_data = {
+                    'version': '2.0',
+                    'exported_at': datetime.now().isoformat(),
+                    'tracks': self.analyzed_tracks
+                }
+                
+                with open(file_path, 'w', encoding='utf-8') as f:
+                    json.dump(export_data, f, indent=2, ensure_ascii=False)
+                
+                QMessageBox.information(self, "Export erfolgreich", f"Daten wurden als JSON exportiert:\n{file_path}")
+                
+            except Exception as e:
+                QMessageBox.critical(self, "Export-Fehler", f"Fehler beim Export:\n{str(e)}")
+    
+    def show_about(self):
+        """Zeigt den Über-Dialog"""
+        QMessageBox.about(
+            self,
+            "Über DJ Audio-Analyse-Tool Pro",
+            "DJ Audio-Analyse-Tool Pro v2.0\n\n"
+            "Professionelle Audio-Analyse für DJs\n\n"
+            "Features:\n"
+            "• Erweiterte Audio-Analyse mit Essentia\n"
+            "• Hybrid Mood-Classifier\n"
+            "• Intelligente Playlist-Engine\n"
+            "• Interaktive Camelot Wheel\n"
+            "• Rekordbox-Integration\n\n"
+            "© 2024 DJ Audio-Analyse-Tool"
+        )
+    
+    def update_status(self, message: str):
+        """Aktualisiert die Statusleiste"""
+        self.status_bar.showMessage(message)
+    
+    def load_settings(self):
+        """Lädt die Anwendungseinstellungen"""
+        # Fenstergeometrie
+        geometry = self.settings.value("geometry")
+        if geometry:
+            self.restoreGeometry(geometry)
+        
+        # Fensterstatus
+        state = self.settings.value("windowState")
+        if state:
+            self.restoreState(state)
+    
+    def save_settings(self):
+        """Speichert die Anwendungseinstellungen"""
+        self.settings.setValue("geometry", self.saveGeometry())
+        self.settings.setValue("windowState", self.saveState())
+    
+    def closeEvent(self, event):
+        """Wird beim Schließen der Anwendung aufgerufen"""
+        # Stoppe laufende Analyse
+        if self.analysis_worker and self.analysis_worker.isRunning():
+            self.analysis_worker.cancel()
+            self.analysis_worker.wait()
+        
+        # Speichere Einstellungen
+        self.save_settings()
+        
+        event.accept()
 
 def main():
+    """Hauptfunktion"""
     app = QApplication(sys.argv)
-    app.setStyle('Fusion')  # Use Fusion style for better dark theme support
     
+    # Setze Anwendungsmetadaten
+    app.setApplicationName("DJ Audio-Analyse-Tool Pro")
+    app.setApplicationVersion("2.0")
+    app.setOrganizationName("DJTool")
+    app.setOrganizationDomain("djtool.com")
+    
+    # Setze Anwendungsstil
+    app.setStyle("Fusion")
+    
+    # Erstelle und zeige Hauptfenster
     window = MainWindow()
     window.show()
     
-    sys.exit(app.exec_())
+    # Starte Event-Loop
+    sys.exit(app.exec())
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     main()
