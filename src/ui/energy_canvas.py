@@ -120,9 +120,19 @@ class EnergyCanvasWidget(QWidget):
         self.setMinimumSize(self.config.width, self.config.height)
         self.setStyleSheet(self._get_stylesheet())
         
+        # Bezier-Kurven-Unterstützung
+        self.bezier_mode = False
+        self.control_points = []  # Bezier-Kontrollpunkte
+        self.bezier_segments = 50  # Anzahl Segmente für Bezier-Kurve
+        
+        # Real-time Response (<50ms)
+        self.update_timer = QTimer()
+        self.update_timer.setSingleShot(True)
+        self.update_timer.timeout.connect(self._delayed_update)
+        
         # Tooltip-Setup
         if self.config.show_tooltips:
-            self.setToolTip("Klicken und ziehen um Punkte zu bewegen\nDoppelklick um Punkte hinzuzufügen")
+            self.setToolTip("Klicken und ziehen um Punkte zu bewegen\nDoppelklick um Punkte hinzuzufügen\nB-Taste für Bezier-Modus")
     
     def _setup_default_curve(self):
         """Erstellt Standard-Energie-Kurve"""
@@ -200,6 +210,69 @@ class EnergyCanvasWidget(QWidget):
             self.curve_changed.emit(self.energy_points)
             return True
         return False
+    
+    def toggle_bezier_mode(self):
+        """Schaltet zwischen linearen und Bezier-Kurven um"""
+        self.bezier_mode = not self.bezier_mode
+        if self.bezier_mode:
+            self._generate_bezier_control_points()
+        self._delayed_update()
+        logger.info(f"Bezier-Modus: {'aktiviert' if self.bezier_mode else 'deaktiviert'}")
+    
+    def _generate_bezier_control_points(self):
+        """Generiert Bezier-Kontrollpunkte aus Energie-Punkten"""
+        if len(self.energy_points) < 2:
+            return
+        
+        self.control_points = []
+        
+        for i in range(len(self.energy_points) - 1):
+            p1 = self.energy_points[i]
+            p2 = self.energy_points[i + 1]
+            
+            # Berechne Kontrollpunkte für kubische Bezier-Kurve
+            dx = p2.position - p1.position
+            dy = p2.energy - p1.energy
+            
+            # Kontrollpunkte mit 1/3 Abstand
+            cp1_x = p1.position + dx * 0.33
+            cp1_y = p1.energy + dy * 0.33
+            
+            cp2_x = p1.position + dx * 0.67
+            cp2_y = p1.energy + dy * 0.67
+            
+            self.control_points.append([
+                QPointF(p1.position, p1.energy),
+                QPointF(cp1_x, cp1_y),
+                QPointF(cp2_x, cp2_y),
+                QPointF(p2.position, p2.energy)
+            ])
+    
+    def _calculate_bezier_point(self, t: float, p0: QPointF, p1: QPointF, p2: QPointF, p3: QPointF) -> QPointF:
+        """Berechnet Punkt auf kubischer Bezier-Kurve"""
+        u = 1 - t
+        tt = t * t
+        uu = u * u
+        uuu = uu * u
+        ttt = tt * t
+        
+        x = uuu * p0.x() + 3 * uu * t * p1.x() + 3 * u * tt * p2.x() + ttt * p3.x()
+        y = uuu * p0.y() + 3 * uu * t * p1.y() + 3 * u * tt * p2.y() + ttt * p3.y()
+        
+        return QPointF(x, y)
+    
+    def _delayed_update(self):
+        """Verzögertes Update für Real-time Response <50ms"""
+        start_time = time.time()
+        self.update()
+        update_time = (time.time() - start_time) * 1000
+        
+        if update_time > 50:
+            logger.warning(f"Update-Zeit überschritten: {update_time:.1f}ms")
+    
+    def schedule_update(self):
+         """Plant verzögertes Update"""
+         self.update_timer.start(16)  # ~60 FPS
     
     def update_energy_point(self, index: int, position: float, energy: float):
         """Aktualisiert Energie-Punkt"""

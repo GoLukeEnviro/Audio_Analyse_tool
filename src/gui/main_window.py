@@ -69,6 +69,8 @@ try:
     from settings_dialog import SettingsDialog
     from playlist_wizard import PlaylistWizard
     from interactive_timeline import InteractiveTimeline
+    from onboarding_wizard import OnboardingWizard
+    from audio_preview_player import AudioPreviewPlayer
 except ImportError:
     # Fallback: Create dummy classes if modules don't exist
     from PySide6.QtWidgets import QWidget, QDialog
@@ -92,6 +94,15 @@ except ImportError:
         def exec(self): return 0
     
     class InteractiveTimeline(QWidget):
+        def __init__(self, parent=None): super().__init__(parent)
+    
+    class OnboardingWizard(QDialog):
+        def __init__(self, parent=None): 
+            super().__init__(parent)
+            self.setWindowTitle("Willkommen")
+        def exec(self): return 0
+    
+    class AudioPreviewPlayer(QWidget):
         def __init__(self, parent=None): super().__init__(parent)
 
 logger = logging.getLogger(__name__)
@@ -158,6 +169,8 @@ class MainWindow(QMainWindow):
         self.track_browser = TrackBrowser()
         self.playlist_wizard = PlaylistWizard()
         self.interactive_timeline = InteractiveTimeline()
+        self.onboarding_wizard = OnboardingWizard()
+        self.audio_preview = AudioPreviewPlayer()
         
         # Data
         self.analyzed_tracks = []
@@ -172,6 +185,9 @@ class MainWindow(QMainWindow):
         self.setup_ui()
         self.setup_connections()
         self.load_settings()
+        
+        # Prüfe ob Onboarding nötig ist
+        self.check_first_run()
     
     def setup_ui(self):
         """Erstellt die Benutzeroberfläche"""
@@ -269,7 +285,23 @@ class MainWindow(QMainWindow):
         # Erweiterte Tabs
         self.tab_widget.addTab(self.playlist_dashboard, "Playlist Dashboard")
         self.tab_widget.addTab(self.playlist_wizard, "Playlist Wizard")
-        self.tab_widget.addTab(self.interactive_timeline, "Interactive Timeline")
+        
+        # Timeline Tab mit Audio-Preview
+        timeline_widget = QWidget()
+        timeline_layout = QVBoxLayout(timeline_widget)
+        
+        # Splitter für Timeline und Audio-Preview
+        timeline_splitter = QSplitter(Qt.Vertical)
+        
+        timeline_splitter.addWidget(self.interactive_timeline)
+        timeline_splitter.addWidget(self.audio_preview)
+        
+        # Setze Splitter-Verhältnis (Timeline größer)
+        timeline_splitter.setSizes([400, 200])
+        
+        timeline_layout.addWidget(timeline_splitter)
+        
+        self.tab_widget.addTab(timeline_widget, "Interactive Timeline")
         self.tab_widget.addTab(self.track_browser, "Track Browser")
         
         # Tracks tab
@@ -407,6 +439,16 @@ class MainWindow(QMainWindow):
         
         # Table selections
         self.tracks_table.itemSelectionChanged.connect(self.on_track_selected)
+        
+        # Timeline und Audio-Preview Verbindungen
+        if hasattr(self.interactive_timeline, 'track_selected'):
+            self.interactive_timeline.track_selected.connect(self.on_timeline_track_selected)
+        if hasattr(self.interactive_timeline, 'playlist_changed'):
+            self.interactive_timeline.playlist_changed.connect(self.on_timeline_playlist_changed)
+        
+        # Track Browser zu Timeline
+        if hasattr(self.track_browser, 'track_double_clicked'):
+            self.track_browser.track_double_clicked.connect(self.add_track_to_timeline)
     
     def add_files(self):
         """Fügt Audio-Dateien hinzu"""
@@ -764,6 +806,30 @@ class MainWindow(QMainWindow):
         """Speichert die Anwendungseinstellungen"""
         self.settings.setValue("geometry", self.saveGeometry())
         self.settings.setValue("windowState", self.saveState())
+    
+    def check_first_run(self):
+        """Prüft ob dies der erste Start ist und zeigt Onboarding"""
+        first_run = self.settings.value("first_run", True, type=bool)
+        
+        if first_run:
+            # Zeige Onboarding-Wizard
+            if self.onboarding_wizard.exec() == QDialog.Accepted:
+                self.settings.setValue("first_run", False)
+    
+    def on_timeline_track_selected(self, track_data):
+        """Wird aufgerufen wenn ein Track in der Timeline ausgewählt wird"""
+        if hasattr(self.audio_preview, 'load_track'):
+            self.audio_preview.load_track(track_data)
+    
+    def on_timeline_playlist_changed(self, playlist_data):
+        """Wird aufgerufen wenn sich die Timeline-Playlist ändert"""
+        if hasattr(self.playlist_dashboard, 'update_playlist'):
+            self.playlist_dashboard.update_playlist(playlist_data)
+    
+    def add_track_to_timeline(self, track_data):
+        """Fügt einen Track zur Timeline hinzu"""
+        if hasattr(self.interactive_timeline, 'add_track'):
+            self.interactive_timeline.add_track(track_data)
     
     def closeEvent(self, event):
         """Wird beim Schließen der Anwendung aufgerufen"""
