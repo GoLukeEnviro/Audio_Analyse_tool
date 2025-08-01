@@ -36,9 +36,19 @@ class AudioAnalyzer:
         self.enable_multiprocessing = enable_multiprocessing
         self.max_workers = min(mp.cpu_count(), 8)  # Maximal 8 Prozesse
         
-        # Unterstützte Audioformate (erweitert)
+        # Erweiterte unterstützte Audioformate
         self.supported_formats = {
-            '.mp3', '.wav', '.flac', '.aac', '.ogg', '.m4a', '.aiff', '.au'
+            '.mp3', '.wav', '.flac', '.aac', '.ogg', '.m4a', '.aiff', '.au',
+            '.wma', '.mp4', '.3gp', '.amr', '.opus', '.webm', '.mkv'
+        }
+        
+        # Import-Konfiguration
+        self.import_config = {
+            'max_file_size_mb': 500,
+            'sample_rate': 44100,
+            'mono': True,
+            'normalize': True,
+            'trim_silence': True
         }
         
         # Essentia-Algorithmen initialisieren
@@ -191,6 +201,109 @@ class AudioAnalyzer:
             'driving': float(driving),
             'experimental': float(min(experimental, 1.0))
         }
+    
+    def validate_audio_file(self, file_path: str) -> bool:
+        """Validiert Audio-Datei vor der Analyse"""
+        try:
+            # Prüfe Dateigröße
+            file_size_mb = os.path.getsize(file_path) / (1024 * 1024)
+            if file_size_mb > self.import_config['max_file_size_mb']:
+                logger.warning(f"Datei zu groß: {file_size_mb:.1f}MB > {self.import_config['max_file_size_mb']}MB")
+                return False
+            
+            # Prüfe Dateiformat
+            file_ext = Path(file_path).suffix.lower()
+            if file_ext not in self.supported_formats:
+                logger.warning(f"Nicht unterstütztes Format: {file_ext}")
+                return False
+            
+            # Prüfe ob Datei lesbar ist
+            try:
+                y, sr = librosa.load(file_path, sr=None, duration=1.0)  # Teste nur 1 Sekunde
+                if len(y) == 0:
+                    logger.warning(f"Leere Audio-Datei: {file_path}")
+                    return False
+            except Exception as e:
+                logger.warning(f"Kann Audio-Datei nicht laden: {e}")
+                return False
+            
+            return True
+            
+        except Exception as e:
+            logger.error(f"Fehler bei Datei-Validierung: {e}")
+            return False
+    
+    def load_audio_enhanced(self, file_path: str) -> Tuple[np.ndarray, int]:
+        """Erweiterte Audio-Ladung mit Preprocessing"""
+        try:
+            # Lade Audio mit konfigurierten Parametern
+            y, sr = librosa.load(
+                file_path,
+                sr=self.import_config['sample_rate'],
+                mono=self.import_config['mono']
+            )
+            
+            if len(y) == 0:
+                raise ValueError(f"Leere Audio-Datei: {file_path}")
+            
+            # Preprocessing
+            if self.import_config['trim_silence']:
+                y, _ = librosa.effects.trim(y, top_db=20)
+            
+            if self.import_config['normalize']:
+                y = librosa.util.normalize(y)
+            
+            return y, sr
+            
+        except Exception as e:
+            logger.error(f"Fehler beim Laden von {file_path}: {e}")
+            raise
+    
+    def analyze_batch(self, file_paths: List[str], progress_callback=None) -> Dict[str, Dict]:
+        """Analysiert mehrere Dateien mit Worker-Pool"""
+        results = {}
+        
+        if not self.enable_multiprocessing or len(file_paths) < 2:
+            # Sequenzielle Verarbeitung
+            for i, file_path in enumerate(file_paths):
+                try:
+                    results[file_path] = self.analyze_file(file_path)
+                    if progress_callback:
+                        progress_callback(i + 1, len(file_paths))
+                except Exception as e:
+                    logger.error(f"Fehler bei {file_path}: {e}")
+                    results[file_path] = None
+        else:
+            # Parallele Verarbeitung
+            with ProcessPoolExecutor(max_workers=self.max_workers) as executor:
+                # Starte alle Tasks
+                future_to_file = {
+                    executor.submit(self._analyze_file_worker, file_path): file_path
+                    for file_path in file_paths
+                }
+                
+                # Sammle Ergebnisse
+                completed = 0
+                for future in as_completed(future_to_file):
+                    file_path = future_to_file[future]
+                    try:
+                        results[file_path] = future.result()
+                        completed += 1
+                        if progress_callback:
+                            progress_callback(completed, len(file_paths))
+                    except Exception as e:
+                        logger.error(f"Fehler bei {file_path}: {e}")
+                        results[file_path] = None
+        
+        return results
+    
+    def _analyze_file_worker(self, file_path: str) -> Optional[Dict]:
+        """Worker-Funktion für Multiprocessing"""
+        try:
+            return self.analyze_file(file_path)
+        except Exception as e:
+            logger.error(f"Worker-Fehler bei {file_path}: {e}")
+            return None
     
     def _extract_librosa_features(self, y: np.ndarray, sr: int) -> Dict[str, float]:
         """Extrahiert Audio-Features mit librosa"""

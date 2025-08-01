@@ -160,7 +160,7 @@ class EnhancedMoodClassifier:
         return 0.0  # Default C
     
     def classify_mood_heuristic(self, features: np.ndarray) -> Tuple[str, float]:
-        """Heuristik-basierte Mood-Klassifikation als Fallback"""
+        """Erweiterte heuristik-basierte Mood-Klassifikation"""
         if len(features) < 8:
             return 'Driving', 0.5
         
@@ -168,35 +168,49 @@ class EnhancedMoodClassifier:
         spectral_centroid = features[2]
         bpm = features[4] if len(features) > 4 else 120.0
         is_minor = features[7] if len(features) > 7 else 0.0
+        onset_density = features[3] if len(features) > 3 else 2.0
         
         mood_scores = {}
         
         for mood, rules in self.heuristic_rules.items():
             score = 0.0
             
-            # Energy Score Check
+            # Energy Score Check (erweitert)
             if 'energy_score' in rules:
                 min_e, max_e = rules['energy_score']
                 if min_e <= energy_score <= max_e:
-                    score += 0.3
+                    # Graduelle Bewertung statt binär
+                    center = (min_e + max_e) / 2
+                    distance = abs(energy_score - center) / (max_e - min_e)
+                    score += 0.3 * (1.0 - distance)
             
-            # Spectral Centroid Check
+            # Spectral Centroid Check (erweitert)
             if 'spectral_centroid' in rules:
                 min_sc, max_sc = rules['spectral_centroid']
                 if min_sc <= spectral_centroid <= max_sc:
-                    score += 0.3
+                    center = (min_sc + max_sc) / 2
+                    distance = abs(spectral_centroid - center) / (max_sc - min_sc)
+                    score += 0.25 * (1.0 - distance)
             
-            # BPM Check
+            # BPM Check (erweitert)
             if 'bpm' in rules:
                 min_bpm, max_bpm = rules['bpm']
                 if min_bpm <= bpm <= max_bpm:
-                    score += 0.2
+                    center = (min_bpm + max_bpm) / 2
+                    distance = abs(bpm - center) / (max_bpm - min_bpm)
+                    score += 0.2 * (1.0 - distance)
+            
+            # Onset Density Check
+            if 'onset_density' in rules:
+                min_od, max_od = rules['onset_density']
+                if min_od <= onset_density <= max_od:
+                    score += 0.15
             
             # Key-spezifische Gewichtung
             if 'key_minor_weight' in rules and is_minor > 0.5:
-                score += rules['key_minor_weight'] * 0.2
+                score += rules['key_minor_weight'] * 0.1
             elif 'key_major_weight' in rules and is_minor < 0.5:
-                score += rules['key_major_weight'] * 0.2
+                score += rules['key_major_weight'] * 0.1
             
             mood_scores[mood] = score
         
