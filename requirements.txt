@@ -1,40 +1,43 @@
-# DJ Audio-Analyse-Tool Pro - Dependencies
+# DJ Audio Analysis Tool - Dependencies
 
 # Core Audio Processing
-essentia==2.1b6.dev1034
-librosa==0.10.1
-soundfile==0.12.1
-audioread>=2.1.9
+librosa>=0.10.0
+numpy>=1.21.0
+scipy>=1.7.0
+soundfile>=0.12.0
+audioread>=3.0.0
+
+# Audio Metadata
 mutagen>=1.45.0
 
-# Machine Learning
-lightgbm==4.1.0
-numpy==1.24.3
-scipy==1.11.1
-scikit-learn==1.3.0
-
 # GUI Framework
-PySide6==6.6.0
-qtawesome==1.2.3
+PySide6>=6.4.0
+matplotlib>=3.5.0
 
 # Data Processing
-pandas==2.0.3
-pyyaml==6.0.1
+pandas>=1.3.0
+numpy>=1.21.0
 
-# Export functionality
+# Export Formats
 lxml>=4.6.0
 
-# Performance & Utilities
-click==8.1.7
-tqdm==4.66.1
-loguru==0.7.2
-requests>=2.25.0
-
-# Development and building
-pyinstaller>=5.0.0
-setuptools>=65.0.0
-wheel>=0.38.0
-
-# Testing
+# Testing Framework
 pytest>=7.0.0
-pytest-qt>=4.2.0
+pytest-mock>=3.6.0
+pytest-cov>=4.0.0
+
+# Optional: Advanced Audio Analysis
+# essentia>=2.1b6.dev1034  # Uncomment for Linux/macOS systems
+
+# Development Tools (optional)
+# black>=22.0.0
+# flake8>=4.0.0
+# mypy>=0.950
+
+# Performance (optional)
+# numba>=0.56.0
+# joblib>=1.1.0
+
+# Additional Audio Formats (optional)
+# pydub>=0.25.0
+# ffmpeg-python>=0.2.0

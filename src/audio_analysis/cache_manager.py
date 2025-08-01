@@ -70,6 +70,28 @@ class CacheManager:
         
         if not cache_path.exists():
             return False
+    
+    # Alias methods for compatibility
+    def store(self, key: str, data: Dict[str, Any]) -> bool:
+        """Store data in cache (alias for save_to_cache)"""
+        return self.save_to_cache(key, data)
+    
+    def get(self, key: str) -> Optional[Dict[str, Any]]:
+        """Get data from cache (alias for load_from_cache)"""
+        cached_data = self.load_from_cache(key)
+        if cached_data and 'analysis_data' in cached_data:
+            return cached_data['analysis_data']
+        return cached_data
+    
+    def get_cache_info(self) -> Dict[str, Any]:
+        """Get cache information"""
+        return {
+            'total_files': self.metadata.get('total_files', 0),
+            'total_size_bytes': self.metadata.get('total_size_bytes', 0),
+            'cache_dir': str(self.cache_dir),
+            'created': self.metadata.get('created', 0),
+            'last_cleanup': self.metadata.get('last_cleanup', 0)
+        }
         
         # Prüfe ob die Original-Datei noch existiert und unverändert ist
         if not os.path.exists(file_path):

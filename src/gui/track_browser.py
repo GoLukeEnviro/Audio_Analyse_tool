@@ -1,18 +1,18 @@
 """Track Browser Widget - Anzeige und Verwaltung der analysierten Tracks"""
 
-from PyQt5.QtWidgets import (
+from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QTableWidget, QTableWidgetItem,
     QHeaderView, QLabel, QPushButton, QLineEdit, QComboBox, QSplitter
 )
-from PyQt5.QtCore import Qt, pyqtSignal
-from PyQt5.QtGui import QFont
+from PySide6.QtCore import Qt, Signal
+from PySide6.QtGui import QFont
 import os
 
 
 class TrackBrowser(QWidget):
     """Widget für die Anzeige und Verwaltung der analysierten Tracks"""
     
-    track_selected = pyqtSignal(dict)  # Signal wenn Track ausgewählt wird
+    track_selected = Signal(dict)  # Signal wenn Track ausgewählt wird
     
     def __init__(self, parent=None):
         super().__init__(parent)

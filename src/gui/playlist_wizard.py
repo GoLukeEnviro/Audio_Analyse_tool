@@ -14,7 +14,7 @@ from PySide6.QtCore import Qt, Signal, QTimer, QPropertyAnimation, QEasingCurve
 from PySide6.QtGui import QPainter, QPen, QBrush, QColor, QFont, QPixmap
 from PySide6.QtCharts import QChart, QChartView, QLineSeries, QValueAxis
 
-from ..playlist_engine.generator import PlaylistGenerator
+from playlist_engine.generator import PlaylistGenerator
 
 
 class MoodPresetCard(QFrame):

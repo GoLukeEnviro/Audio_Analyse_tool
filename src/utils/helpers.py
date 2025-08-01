@@ -95,7 +95,7 @@ class FileUtils:
     @staticmethod
     def get_audio_files(directory: str, extensions: Optional[List[str]] = None) -> List[str]:
         if extensions is None:
-            extensions = ['.mp3', '.wav', '.flac', '.m4a', '.aac', '.ogg']
+            extensions = ['.mp3', '.wav', '.flac', '.m4a', '.aac', '.ogg', '.aiff', '.aif']
         
         audio_files = []
         for root, dirs, files in os.walk(directory):

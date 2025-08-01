@@ -670,3 +670,7 @@ class InteractiveTimeline(QWidget):
     def get_playlist(self) -> List[Dict[str, Any]]:
         """Gibt aktuelle Playlist zurück"""
         return self.playlist.copy()
+    
+    def load_playlist(self, playlist: List[Dict[str, Any]]):
+        """Lädt eine Playlist in die Timeline"""
+        self.set_playlist(playlist)

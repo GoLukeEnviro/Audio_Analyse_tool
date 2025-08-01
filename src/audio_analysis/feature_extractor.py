@@ -5,6 +5,13 @@ import numpy as np
 from typing import Dict, Any, Optional
 import warnings
 warnings.filterwarnings('ignore')
+try:
+    from .essentia_integration import get_essentia_integration, is_essentia_available
+except ImportError:
+    def get_essentia_integration():
+        return None
+    def is_essentia_available():
+        return False
 
 
 class FeatureExtractor:
@@ -13,6 +20,107 @@ class FeatureExtractor:
     def __init__(self, sample_rate: int = 22050, hop_length: int = 512):
         self.sample_rate = sample_rate
         self.hop_length = hop_length
+        self.essentia = get_essentia_integration()
+        
+        # Configure Essentia algorithms if available
+        if is_essentia_available():
+            self.essentia.configure_algorithms({
+                'beat_tracker': {
+                    'maxTempo': 200,
+                    'minTempo': 60
+                },
+                'key_extractor': {
+                    'profileType': 'temperley'
+                }
+            })
+    
+    def extract_bpm(self, audio_data: np.ndarray, sample_rate: int) -> float:
+        """Extract BPM from audio data using Essentia with librosa fallback"""
+        try:
+            # Try Essentia first if available
+            if is_essentia_available():
+                bpm = self.essentia.extract_bpm(audio_data, sample_rate)
+                if bpm is not None:
+                    return bpm
+            
+            # Fallback to librosa
+            tempo = librosa.beat.tempo(y=audio_data, sr=sample_rate)
+            return float(tempo[0]) if len(tempo) > 0 else 120.0
+        except Exception as e:
+            print(f"Error extracting BPM: {e}")
+            return 120.0
+    
+    def extract_key(self, audio_data: np.ndarray, sample_rate: int) -> str:
+        """Extract musical key from audio data using Essentia with librosa fallback"""
+        try:
+            # Try Essentia first if available
+            if is_essentia_available():
+                key, scale, strength = self.essentia.extract_key(audio_data, sample_rate)
+                if key and scale:
+                    return f"{key} {scale}"
+            
+            # Fallback to librosa
+            # Extract chroma features
+            chroma = librosa.feature.chroma_cqt(y=audio_data, sr=sample_rate)
+            
+            # Calculate mean chroma
+            chroma_mean = np.mean(chroma, axis=1)
+            
+            # Key templates (simplified)
+            key_names = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B']
+            
+            # Find the key with maximum correlation
+            key_idx = np.argmax(chroma_mean)
+            
+            # Simple major/minor detection (placeholder)
+            scale = 'major' if chroma_mean[key_idx] > np.mean(chroma_mean) else 'minor'
+            
+            return f"{key_names[key_idx]} {scale}"
+        except Exception as e:
+            print(f"Error extracting key: {e}")
+            return "C major"
+    
+    def extract_energy_level(self, audio_data: np.ndarray) -> float:
+        """Extract energy level from audio data"""
+        try:
+            rms = librosa.feature.rms(y=audio_data)[0]
+            return float(np.mean(rms))
+        except Exception as e:
+            print(f"Error extracting energy level: {e}")
+            return 0.5
+    
+    def extract_spectral_features(self, audio_data: np.ndarray, sample_rate: int) -> Dict[str, Any]:
+        """Extract spectral features from audio data"""
+        try:
+            spectral_centroid = librosa.feature.spectral_centroid(y=audio_data, sr=sample_rate)
+            spectral_rolloff = librosa.feature.spectral_rolloff(y=audio_data, sr=sample_rate)
+            spectral_bandwidth = librosa.feature.spectral_bandwidth(y=audio_data, sr=sample_rate)
+            
+            return {
+                'spectral_centroid': float(np.mean(spectral_centroid)),
+                'spectral_rolloff': float(np.mean(spectral_rolloff)),
+                'spectral_bandwidth': float(np.mean(spectral_bandwidth))
+            }
+        except Exception as e:
+            print(f"Error extracting spectral features: {e}")
+            return {
+                'spectral_centroid': 2000.0,
+                'spectral_rolloff': 4000.0,
+                'spectral_bandwidth': 1000.0
+            }
+    
+    def extract_mfcc_features(self, audio_data: np.ndarray, sample_rate: int) -> Dict[str, Any]:
+        """Extract MFCC features from audio data"""
+        try:
+            mfcc = librosa.feature.mfcc(y=audio_data, sr=sample_rate, n_mfcc=13)
+            return {
+                'mfcc': np.mean(mfcc, axis=1).tolist()
+            }
+        except Exception as e:
+            print(f"Error extracting MFCC features: {e}")
+            return {
+                'mfcc': [0.0] * 13
+            }
         
     def extract_all_features(self, audio_path: str, duration: Optional[float] = None) -> Dict[str, Any]:
         """Extrahiert alle verfügbaren Features aus einer Audio-Datei"""
@@ -75,9 +183,19 @@ class FeatureExtractor:
         features = {}
         
         try:
-            # Tempo/BPM
-            tempo, beats = librosa.beat.beat_track(y=y, sr=sr, hop_length=self.hop_length)
-            features['bpm'] = float(tempo)
+            # Tempo/BPM - Try Essentia first if available
+            if is_essentia_available():
+                essentia_bpm = self.essentia.extract_bpm(y, sr)
+                if essentia_bpm is not None:
+                    features['bpm'] = float(essentia_bpm)
+                    # Still get beats for other calculations
+                    tempo, beats = librosa.beat.beat_track(y=y, sr=sr, hop_length=self.hop_length)
+                else:
+                    tempo, beats = librosa.beat.beat_track(y=y, sr=sr, hop_length=self.hop_length)
+                    features['bpm'] = float(tempo)
+            else:
+                tempo, beats = librosa.beat.beat_track(y=y, sr=sr, hop_length=self.hop_length)
+                features['bpm'] = float(tempo)
             features['beat_count'] = len(beats)
             
             # Onset Detection
@@ -110,6 +228,13 @@ class FeatureExtractor:
         features = {}
         
         try:
+            # Try Essentia key extraction first
+            if is_essentia_available():
+                key, scale, strength = self.essentia.extract_key(y, sr)
+                if key and scale:
+                    features['detected_key'] = f"{key} {scale}"
+                    features['key_strength'] = float(strength) if strength else 0.0
+            
             # Chroma Features für Tonart-Erkennung
             chroma = librosa.feature.chroma_stft(y=y, sr=sr, hop_length=self.hop_length)
             features['chroma_mean'] = chroma.mean(axis=1).tolist()

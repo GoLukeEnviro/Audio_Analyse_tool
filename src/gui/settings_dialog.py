@@ -1,13 +1,13 @@
 """Settings Dialog - Anwendungseinstellungen und Konfiguration"""
 
-from PyQt5.QtWidgets import (
+from PySide6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QGridLayout, QGroupBox,
     QLabel, QPushButton, QSpinBox, QDoubleSpinBox, QComboBox,
     QCheckBox, QLineEdit, QFileDialog, QTabWidget, QWidget,
     QSlider, QTextEdit, QDialogButtonBox
 )
-from PyQt5.QtCore import Qt, pyqtSignal
-from PyQt5.QtGui import QFont
+from PySide6.QtCore import Qt, Signal
+from PySide6.QtGui import QFont
 import json
 import os
 
@@ -15,7 +15,7 @@ import os
 class SettingsDialog(QDialog):
     """Dialog für Anwendungseinstellungen"""
     
-    settings_changed = pyqtSignal(dict)  # Signal wenn Einstellungen geändert werden
+    settings_changed = Signal(dict)  # Signal wenn Einstellungen geändert werden
     
     def __init__(self, parent=None):
         super().__init__(parent)

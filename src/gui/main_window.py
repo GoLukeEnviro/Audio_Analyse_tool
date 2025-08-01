@@ -25,85 +25,19 @@ from PySide6.QtGui import (
 )
 
 # Import core modules
-try:
-    from core.mood_classifier import HybridClassifier
-except ImportError:
-    class HybridClassifier:
-        def __init__(self): pass
-        def classify(self, features): return {'mood': 'unknown'}
-
-try:
-    from core.cache_manager import CacheManager
-except ImportError:
-    class CacheManager:
-        def __init__(self): pass
-        def get(self, key): return None
-        def set(self, key, value): pass
-
-try:
-    from core.playlist_engine import PlaylistEngine, PlaylistPreset, PlaylistRule, SortingAlgorithm
-except ImportError:
-    from enum import Enum
-    class SortingAlgorithm(Enum):
-        HARMONIC = "harmonic"
-    class PlaylistRule:
-        def __init__(self, *args, **kwargs): pass
-    class PlaylistPreset:
-        def __init__(self, *args, **kwargs): pass
-    class PlaylistEngine:
-        def __init__(self): pass
-        def generate_playlist(self, tracks, preset=None): return tracks[:10]
-
+from core.mood_classifier import HybridClassifier
+from core.cache_manager import CacheManager
+from core.playlist_engine import PlaylistEngine, PlaylistPreset, PlaylistRule, SortingAlgorithm
 from audio_analysis.analyzer import AudioAnalyzer
-
-try:
-    from export.playlist_exporter import PlaylistExporter
-except ImportError:
-    class PlaylistExporter:
-        def __init__(self): pass
-        def export_m3u(self, tracks, path): return True
+from export.playlist_exporter import PlaylistExporter
 # Import GUI modules
-try:
-    from playlist_dashboard import PlaylistDashboard
-    from track_browser import TrackBrowser
-    from settings_dialog import SettingsDialog
-    from playlist_wizard import PlaylistWizard
-    from interactive_timeline import InteractiveTimeline
-    from onboarding_wizard import OnboardingWizard
-    from audio_preview_player import AudioPreviewPlayer
-except ImportError:
-    # Fallback: Create dummy classes if modules don't exist
-    from PySide6.QtWidgets import QWidget, QDialog
-    
-    class PlaylistDashboard(QWidget):
-        def __init__(self, parent=None): super().__init__(parent)
-    
-    class TrackBrowser(QWidget):
-        def __init__(self, parent=None): super().__init__(parent)
-    
-    class SettingsDialog(QDialog):
-        def __init__(self, parent=None): 
-            super().__init__(parent)
-            self.setWindowTitle("Einstellungen")
-        def exec(self): return 0
-    
-    class PlaylistWizard(QDialog):
-        def __init__(self, parent=None): 
-            super().__init__(parent)
-            self.setWindowTitle("Playlist Wizard")
-        def exec(self): return 0
-    
-    class InteractiveTimeline(QWidget):
-        def __init__(self, parent=None): super().__init__(parent)
-    
-    class OnboardingWizard(QDialog):
-        def __init__(self, parent=None): 
-            super().__init__(parent)
-            self.setWindowTitle("Willkommen")
-        def exec(self): return 0
-    
-    class AudioPreviewPlayer(QWidget):
-        def __init__(self, parent=None): super().__init__(parent)
+from gui.playlist_dashboard import PlaylistDashboard
+from gui.track_browser import TrackBrowser
+from gui.settings_dialog import SettingsDialog
+from gui.playlist_wizard import PlaylistWizard
+from gui.interactive_timeline import InteractiveTimeline
+from gui.onboarding_wizard import OnboardingWizard
+from gui.audio_preview_player import AudioPreviewPlayer
 
 logger = logging.getLogger(__name__)
 

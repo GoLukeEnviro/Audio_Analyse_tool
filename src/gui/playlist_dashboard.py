@@ -1,12 +1,12 @@
 """Playlist Dashboard Widget - Konfiguration und Verwaltung von Playlist-Regeln"""
 
-from PyQt5.QtWidgets import (
+from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QGridLayout, QGroupBox,
     QLabel, QPushButton, QSpinBox, QDoubleSpinBox, QComboBox,
     QCheckBox, QSlider, QTextEdit, QSplitter, QFrame
 )
-from PyQt5.QtCore import Qt, pyqtSignal
-from PyQt5.QtGui import QFont
+from PySide6.QtCore import Qt, Signal
+from PySide6.QtGui import QFont
 import json
 import os
 
@@ -14,7 +14,7 @@ import os
 class PlaylistDashboard(QWidget):
     """Widget für Playlist-Konfiguration und -Verwaltung"""
     
-    generate_playlist = pyqtSignal(dict)  # Signal für Playlist-Generierung
+    generate_playlist = Signal(dict)  # Signal für Playlist-Generierung
     
     def __init__(self, parent=None):
         super().__init__(parent)

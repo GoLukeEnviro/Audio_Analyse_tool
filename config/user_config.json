@@ -1,28 +1,9 @@
 {
-  "first_run": true,
-  "music_library_path": "",
-  "analysis_settings": {
-    "enable_bpm_detection": true,
-    "enable_key_detection": true,
-    "enable_energy_analysis": true,
-    "enable_mood_classification": true,
-    "audio_quality": "high",
-    "cache_analysis_results": true
-  },
-  "ui_settings": {
-    "theme": "dark",
-    "auto_save_playlists": true,
-    "show_waveforms": true,
-    "timeline_zoom_level": 100
-  },
-  "export_settings": {
-    "default_format": "m3u",
-    "include_metadata": true,
-    "relative_paths": false
-  },
-  "performance_settings": {
-    "max_concurrent_analysis": 4,
-    "enable_gpu_acceleration": false,
-    "memory_limit_mb": 2048
-  }
+  "music_library_path": "F:/Contents",
+  "cache_location": "cache",
+  "analysis_quality": "high",
+  "enable_multiprocessing": true,
+  "auto_analyze": true,
+  "export_format": "m3u",
+  "theme": "dark"
 }

@@ -1,0 +1,48 @@
+{
+  "audio": {
+    "sample_rate": 48000,
+    "hop_length": 512,
+    "analysis_duration": 120,
+    "supported_formats": [
+      "mp3",
+      "wav",
+      "flac"
+    ]
+  },
+  "analysis": {
+    "features": [
+      "chroma",
+      "mfcc",
+      "spectral_centroid",
+      "rms",
+      "zero_crossing_rate",
+      "tempo"
+    ],
+    "bpm_range": [
+      80,
+      180
+    ],
+    "key_threshold": 0.3
+  },
+  "gui": {
+    "theme": "Dark",
+    "font_size": 10,
+    "show_spectogram": false,
+    "auto_refresh": true,
+    "max_workers": 4
+  },
+  "export": {
+    "default_directory": "C:\\Users\\CodeLuke/Music/Playlists",
+    "formats": [
+      "m3u",
+      "xml"
+    ],
+    "relative_paths": true,
+    "include_metadata": true
+  },
+  "cache": {
+    "directory": "data/cache",
+    "max_size_mb": 1000,
+    "cleanup_days": 30
+  }
+}

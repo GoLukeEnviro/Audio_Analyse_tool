@@ -38,7 +38,7 @@ class AudioAnalyzer:
         
         # Erweiterte unterstützte Audioformate
         self.supported_formats = {
-            '.mp3', '.wav', '.flac', '.aac', '.ogg', '.m4a', '.aiff', '.au',
+            '.mp3', '.wav', '.flac', '.aac', '.ogg', '.m4a', '.aiff', '.aif', '.au',
             '.wma', '.mp4', '.3gp', '.amr', '.opus', '.webm', '.mkv'
         }
         
@@ -532,7 +532,7 @@ class AudioAnalyzer:
                 progress_callback(f"Loading {os.path.basename(file_path)}...")
             
             # Load audio file
-            y, sr = librosa.load(file_path, duration=120)  # Analyze first 2 minutes
+            y, sr = librosa.load(file_path, sr=None)  # Load with original sample rate for full analysis
             
             if progress_callback:
                 progress_callback("Extrahiere librosa Features...")
