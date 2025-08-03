@@ -1,0 +1,18 @@
+{
+  "Custom_1": {
+    "bpm_min": 130,
+    "bpm_max": 150,
+    "bpm_tolerance": 4,
+    "energy_min": 0.8,
+    "energy_flow": "Any",
+    "moods": [
+      "Euphoric",
+      "Dark",
+      "Driving"
+    ],
+    "key_compatibility": "Camelot Compatible",
+    "start_key": "Auto",
+    "sort_by": "Energy",
+    "max_tracks": 20
+  }
+}

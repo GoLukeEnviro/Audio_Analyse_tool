@@ -1,6 +1,6 @@
 {
   "audio": {
-    "sample_rate": 22050,
+    "sample_rate": 48000,
     "hop_length": 512,
     "analysis_duration": 120,
     "supported_formats": [
@@ -27,7 +27,7 @@
   "gui": {
     "theme": "Dark",
     "font_size": 10,
-    "show_spectogram": false,
+    "show_spectogram": true,
     "auto_refresh": true,
     "max_workers": 2
   },
@@ -35,7 +35,9 @@
     "default_directory": "C:\\Users\\CodeLuke/Music/Playlists",
     "formats": [
       "m3u",
-      "xml"
+      "m3u8",
+      "xml",
+      "json"
     ],
     "relative_paths": true,
     "include_metadata": true

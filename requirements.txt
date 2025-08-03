@@ -26,8 +26,10 @@ pytest>=7.0.0
 pytest-mock>=3.6.0
 pytest-cov>=4.0.0
 
-# Optional: Advanced Audio Analysis
-# essentia>=2.1b6.dev1034  # Uncomment for Linux/macOS systems
+# Optional: Advanced Audio Analysis (Linux/macOS recommended)
+# essentia>=2.1b6.dev1034  # May require compilation on Windows
+# Note: Essentia provides enhanced audio analysis but is optional
+# The tool will fallback to librosa if essentia is not available
 
 # Development Tools (optional)
 # black>=22.0.0

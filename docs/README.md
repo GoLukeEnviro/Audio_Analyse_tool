@@ -6,6 +6,7 @@ Willkommen zur umfassenden Dokumentation des DJ Audio-Analyse-Tools Pro v2.0.
 
 ### Benutzer-Dokumentation
 - [Installation Guide](installation.md) - Schritt-für-Schritt Installationsanleitung
+- [Essentia Setup](essentia_setup.md) - Erweiterte Audio-Analyse mit Essentia
 - [User Guide](user-guide.md) - Vollständige Bedienungsanleitung
 - [Quick Start](quick-start.md) - Schnelleinstieg für neue Benutzer
 - [FAQ](faq.md) - Häufig gestellte Fragen

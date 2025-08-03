@@ -116,8 +116,12 @@ python main.py
 
 3. **Erweiterte Abhängigkeiten installieren**
    ```bash
-   pip install lightgbm essentia-tensorflow
+   pip install lightgbm
+   # Essentia (optional, siehe Setup-Guide)
+   pip install essentia  # Linux/macOS empfohlen
    ```
+
+   > 📋 **Essentia Setup**: Für erweiterte Audio-Analyse siehe [Essentia Setup Guide](docs/essentia_setup.md)
 
 ## 📖 Dokumentation
 
