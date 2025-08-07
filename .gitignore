@@ -187,3 +187,6 @@ demo_exports/dj_set_harmonic_flow.m3u
 
 .trae/documents/audio_analyse_tool_requirements.md
 .trae/documents/audio_analyse_tool_requirements.md
+CLAUDE.md
+GEMINI.md
+.claude/settings.local.json

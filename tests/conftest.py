@@ -1,10 +1,76 @@
+"""
+Pytest configuration and fixtures for FastAPI backend testing
+"""
+
 import pytest
-import numpy as np
-import os
+import asyncio
 import tempfile
+import os
 import json
-from unittest.mock import Mock, patch
 from pathlib import Path
+from typing import Generator, Dict, List
+from unittest.mock import Mock, AsyncMock
+import numpy as np
+
+from fastapi.testclient import TestClient
+from httpx import AsyncClient
+
+# Import backend components
+import sys
+backend_root = Path(__file__).parent.parent / "backend"
+sys.path.insert(0, str(backend_root))
+
+from main import app
+from config.settings import settings
+
+
+@pytest.fixture(scope="session")
+def event_loop():
+    """Create an instance of the default event loop for the test session."""
+    loop = asyncio.get_event_loop_policy().new_event_loop()
+    yield loop
+    loop.close()
+
+
+@pytest.fixture
+def client():
+    """FastAPI test client"""
+    with TestClient(app) as test_client:
+        yield test_client
+
+
+@pytest.fixture
+async def async_client():
+    """Async FastAPI test client"""
+    async with AsyncClient(app=app, base_url="http://test") as ac:
+        yield ac
+
+
+@pytest.fixture(scope="session")
+def test_data_dir():
+    """Directory for test data files"""
+    test_dir = Path(__file__).parent / 'data'
+    test_dir.mkdir(exist_ok=True)
+    return test_dir
+
+
+@pytest.fixture
+def temp_cache_dir():
+    """Temporary cache directory for testing"""
+    with tempfile.TemporaryDirectory() as temp_dir:
+        cache_dir = Path(temp_dir) / "cache"
+        cache_dir.mkdir()
+        yield str(cache_dir)
+
+
+@pytest.fixture
+def temp_export_dir():
+    """Temporary export directory for testing"""
+    with tempfile.TemporaryDirectory() as temp_dir:
+        export_dir = Path(temp_dir) / "exports"
+        export_dir.mkdir()
+        yield str(export_dir)
+
 
 @pytest.fixture
 def mock_audio_data():
@@ -20,170 +86,325 @@ def mock_audio_data():
     
     return audio_data, sample_rate
 
-@pytest.fixture
-def mock_track_metadata():
-    """Mock track metadata for testing"""
-    return {
-        'filename': 'test_track.mp3',
-        'title': 'Test Track',
-        'artist': 'Test Artist',
-        'bpm': 128.0,
-        'key': 'C',
-        'camelot_key': '8B',
-        'energy_level': 0.75,
-        'mood': 'energetic',
-        'duration': 180.0,
-        'spectral_centroid': 2000.0,
-        'spectral_rolloff': 4000.0,
-        'zero_crossing_rate': 0.1,
-        'mfcc': np.random.rand(13).tolist(),
-        'chroma': np.random.rand(12).tolist(),
-        'tempo_confidence': 0.95
-    }
 
 @pytest.fixture
-def temp_audio_file(mock_audio_data):
-    """Create a temporary audio file for testing"""
+def mock_audio_file(mock_audio_data, test_data_dir):
+    """Create a mock audio file for testing"""
     audio_data, sample_rate = mock_audio_data
     
-    with tempfile.NamedTemporaryFile(suffix='.wav', delete=False) as temp_file:
-        # Mock file creation - in real scenario would use soundfile
-        temp_file.write(b'RIFF')
-        temp_file.write((36 + len(audio_data) * 2).to_bytes(4, 'little'))
-        temp_file.write(b'WAVE')
+    # Create a simple WAV file mock
+    audio_file = test_data_dir / "test_track.wav"
+    
+    # Create mock WAV file (simplified)
+    with open(audio_file, 'wb') as f:
+        # Write basic WAV header
+        f.write(b'RIFF')
+        f.write((36 + len(audio_data) * 2).to_bytes(4, 'little'))
+        f.write(b'WAVE')
+        f.write(b'fmt ')
+        f.write((16).to_bytes(4, 'little'))
+        f.write((1).to_bytes(2, 'little'))  # PCM
+        f.write((1).to_bytes(2, 'little'))  # Mono
+        f.write(sample_rate.to_bytes(4, 'little'))
+        f.write((sample_rate * 2).to_bytes(4, 'little'))
+        f.write((2).to_bytes(2, 'little'))
+        f.write((16).to_bytes(2, 'little'))
+        f.write(b'data')
+        f.write((len(audio_data) * 2).to_bytes(4, 'little'))
         
-        yield temp_file.name
-        
+        # Write audio data as 16-bit PCM
+        for sample in audio_data:
+            sample_int = int(sample * 32767)
+            f.write(sample_int.to_bytes(2, 'little', signed=True))
+    
+    yield str(audio_file)
+    
     # Cleanup
-    try:
-        os.unlink(temp_file.name)
-    except FileNotFoundError:
-        pass
+    if audio_file.exists():
+        audio_file.unlink()
+
+
+@pytest.fixture
+def sample_track_analysis():
+    """Sample track analysis data"""
+    return {
+        "file_path": "/path/to/test_track.mp3",
+        "filename": "test_track.mp3",
+        "features": {
+            "energy": 0.75,
+            "valence": 0.65,
+            "danceability": 0.8,
+            "bpm": 128.0,
+            "key_numeric": 5.0,
+            "mode": "major",
+            "loudness": -10.5,
+            "spectral_centroid": 2000.0,
+            "zero_crossing_rate": 0.1,
+            "mfcc_variance": 15.2
+        },
+        "metadata": {
+            "title": "Test Track",
+            "artist": "Test Artist",
+            "album": "Test Album",
+            "genre": "Electronic",
+            "year": "2024",
+            "duration": 180.0,
+            "file_size": 5242880,
+            "file_path": "/path/to/test_track.mp3",
+            "filename": "test_track.mp3",
+            "extension": ".mp3",
+            "analyzed_at": 1704067200.0
+        },
+        "camelot": {
+            "key": "C Major",
+            "camelot": "8B",
+            "key_confidence": 0.95,
+            "compatible_keys": ["8A", "9B", "7B"]
+        },
+        "derived_metrics": {
+            "energy_level": "high",
+            "bmp_category": "medium",
+            "estimated_mood": "euphoric",
+            "danceability_level": "high"
+        },
+        "mood": {
+            "primary_mood": "euphoric",
+            "confidence": 0.85,
+            "scores": {
+                "euphoric": 0.85,
+                "driving": 0.7,
+                "uplifting": 0.6,
+                "chill": 0.2,
+                "dark": 0.1
+            },
+            "explanation": "Classified as euphoric with 85% confidence"
+        },
+        "errors": [],
+        "status": "completed",
+        "version": "2.0"
+    }
+
+
+@pytest.fixture
+def sample_playlist_data(sample_track_analysis):
+    """Sample playlist data with multiple tracks"""
+    tracks = []
+    for i in range(3):
+        track = sample_track_analysis.copy()
+        track["file_path"] = f"/path/to/track_{i+1}.mp3"
+        track["filename"] = f"track_{i+1}.mp3"
+        track["metadata"]["title"] = f"Test Track {i+1}"
+        track["features"]["bpm"] = 128.0 + i * 2  # Varying BPMs
+        tracks.append(track)
+    
+    return {
+        "tracks": tracks,
+        "metadata": {
+            "total_tracks": 3,
+            "total_duration_seconds": 540.0,
+            "total_duration_minutes": 9.0,
+            "average_energy": 0.75,
+            "average_valence": 0.65,
+            "average_danceability": 0.8,
+            "bpm_stats": {"min": 128.0, "max": 132.0, "avg": 130.0},
+            "key_distribution": {"8B": 3},
+            "mood_distribution": {"euphoric": 3},
+            "energy_progression": [0.75, 0.75, 0.75],
+            "preset_name": "hybrid_smart",
+            "energy_curve": "gradual_build",
+            "mood_flow": "coherent"
+        },
+        "preset_used": "hybrid_smart",
+        "algorithm": "hybrid_smart",
+        "rules_applied": [{"harmonic_compatibility": 0.8}],
+        "created_at": "2024-01-01T12:00:00",
+        "status": "completed"
+    }
+
+
+@pytest.fixture
+def mock_analyzer():
+    """Mock AudioAnalyzer for testing"""
+    analyzer = Mock()
+    analyzer.analyze_track = AsyncMock()
+    analyzer.analyze_batch_async = AsyncMock()
+    analyzer.get_supported_formats.return_value = [".mp3", ".wav", ".flac"]
+    analyzer.get_analysis_stats.return_value = {
+        "total_analyzed": 10,
+        "average_processing_time": 2.5,
+        "cache_hit_rate": 0.8
+    }
+    return analyzer
+
+
+@pytest.fixture
+def mock_playlist_engine():
+    """Mock PlaylistEngine for testing"""
+    engine = Mock()
+    engine.create_playlist_async = AsyncMock()
+    engine.get_all_presets.return_value = [
+        {
+            "name": "hybrid_smart",
+            "description": "Intelligent hybrid algorithm",
+            "algorithm": "hybrid_smart",
+            "energy_curve": "gradual_build",
+            "mood_flow": "coherent",
+            "target_duration_minutes": 60,
+            "is_default": True,
+            "created_at": "2024-01-01T00:00:00"
+        }
+    ]
+    engine.get_preset_details.return_value = {
+        "name": "hybrid_smart",
+        "description": "Intelligent hybrid algorithm",
+        "algorithm": "hybrid_smart",
+        "rules": [],
+        "energy_curve": "gradual_build",
+        "mood_flow": "coherent",
+        "target_duration_minutes": 60,
+        "is_default": True,
+        "created_at": "2024-01-01T00:00:00"
+    }
+    engine.get_algorithm_info.return_value = [
+        {
+            "name": "hybrid_smart",
+            "description": "Intelligent hybrid algorithm",
+            "features": ["harmonic", "energy", "mood"]
+        }
+    ]
+    return engine
+
 
 @pytest.fixture
 def mock_cache_manager():
-    """Mock cache manager for testing"""
+    """Mock CacheManager for testing"""
     cache_manager = Mock()
-    cache_manager.get_cached_analysis.return_value = None
-    cache_manager.cache_analysis.return_value = True
     cache_manager.is_cached.return_value = False
-    cache_manager.clear_cache.return_value = True
+    cache_manager.load_from_cache.return_value = None
+    cache_manager.save_to_cache = Mock()
+    cache_manager.get_cache_stats.return_value = {
+        "total_files": 0,
+        "total_size_bytes": 0,
+        "total_size_mb": 0.0,
+        "cache_directory": "/tmp/cache",
+        "created": 1704067200.0,
+        "last_cleanup": 1704067200.0,
+        "oldest_file": 1704067200.0,
+        "newest_file": 1704067200.0
+    }
+    cache_manager.get_cached_files.return_value = []
+    cache_manager.cleanup_cache.return_value = {
+        "removed_files": 0,
+        "freed_mb": 0.0
+    }
+    cache_manager.clear_cache.return_value = 0
+    cache_manager.optimize_cache.return_value = {
+        "removed_entries": 0,
+        "freed_mb": 0.0
+    }
     return cache_manager
 
+
 @pytest.fixture
-def mock_playlist_data():
-    """Mock playlist data for testing"""
+def mock_mood_classifier():
+    """Mock MoodClassifier for testing"""
+    classifier = Mock()
+    classifier.classify_mood.return_value = ("euphoric", 0.85, {
+        "euphoric": 0.85,
+        "driving": 0.7,
+        "uplifting": 0.6,
+        "chill": 0.2,
+        "dark": 0.1
+    })
+    classifier.get_mood_categories.return_value = [
+        "euphoric", "driving", "dark", "chill", "melancholic", 
+        "aggressive", "uplifting", "mysterious", "neutral"
+    ]
+    return classifier
+
+
+@pytest.fixture
+def mock_playlist_exporter():
+    """Mock PlaylistExporter for testing"""
+    exporter = Mock()
+    exporter.export_playlist.return_value = {
+        "success": True,
+        "output_path": "/tmp/test_playlist.m3u",
+        "filename": "test_playlist.m3u",
+        "track_count": 3,
+        "file_size_bytes": 1024
+    }
+    exporter.get_supported_formats.return_value = ["m3u", "json", "csv", "rekordbox"]
+    exporter.list_exports.return_value = []
+    exporter.delete_export.return_value = True
+    exporter.validate_tracks.return_value = {
+        "valid": True,
+        "issues": [],
+        "track_count": 3
+    }
+    return exporter
+
+
+@pytest.fixture
+def analysis_request_data():
+    """Sample analysis request data"""
     return {
-        'name': 'Test Playlist',
-        'tracks': [
-            {
-                'filename': 'track1.mp3',
-                'bpm': 128.0,
-                'key': 'C',
-                'energy_level': 0.7
-            },
-            {
-                'filename': 'track2.mp3', 
-                'bpm': 130.0,
-                'key': 'G',
-                'energy_level': 0.8
-            },
-            {
-                'filename': 'track3.mp3',
-                'bpm': 132.0,
-                'key': 'D',
-                'energy_level': 0.9
-            }
+        "directories": ["/path/to/music"],
+        "recursive": True,
+        "overwrite_cache": False,
+        "include_patterns": None,
+        "exclude_patterns": None
+    }
+
+
+@pytest.fixture  
+def playlist_generation_request_data():
+    """Sample playlist generation request data"""
+    return {
+        "track_file_paths": [
+            "/path/to/track1.mp3",
+            "/path/to/track2.mp3", 
+            "/path/to/track3.mp3"
         ],
-        'rules': {
-            'bpm_range': [125, 135],
-            'key_compatibility': True,
-            'energy_progression': 'ascending'
-        }
+        "preset_name": "hybrid_smart",
+        "custom_rules": None,
+        "target_duration_minutes": 60
     }
 
-@pytest.fixture
-def mock_essentia():
-    """Mock Essentia algorithms for testing"""
-    essentia_mock = Mock()
-    
-    # Mock BeatTracker
-    beat_tracker = Mock()
-    beat_tracker.return_value = ([1.0, 2.0, 3.0], [128.0])  # beats, bpm
-    essentia_mock.BeatTrackerMultiFeature = Mock(return_value=beat_tracker)
-    
-    # Mock KeyExtractor
-    key_extractor = Mock()
-    key_extractor.return_value = ('C', 'major', 0.9)  # key, scale, strength
-    essentia_mock.KeyExtractor = Mock(return_value=key_extractor)
-    
-    # Mock MusicExtractor
-    music_extractor = Mock()
-    music_extractor.return_value = (Mock(), Mock())  # features, features_frames
-    essentia_mock.MusicExtractor = Mock(return_value=music_extractor)
-    
-    return essentia_mock
 
 @pytest.fixture
-def test_config():
-    """Test configuration"""
+def playlist_export_request_data(sample_playlist_data):
+    """Sample playlist export request data"""
     return {
-        'audio': {
-            'sample_rate': 44100,
-            'hop_length': 512,
-            'n_fft': 2048
-        },
-        'analysis': {
-            'bpm_range': [60, 200],
-            'key_profiles': ['krumhansl', 'temperley'],
-            'energy_window_size': 2048
-        },
-        'playlist': {
-            'max_bpm_difference': 10,
-            'key_compatibility_strict': False,
-            'energy_smoothing': True
-        }
+        "playlist_data": sample_playlist_data,
+        "format_type": "m3u",
+        "filename": "test_playlist",
+        "include_metadata": True
     }
+
+
+# Test utilities
+class TestUtils:
+    """Test utility functions"""
+    
+    @staticmethod
+    def create_mock_track_file(file_path: str, duration: float = 180.0):
+        """Create a mock track file for testing"""
+        Path(file_path).parent.mkdir(parents=True, exist_ok=True)
+        with open(file_path, 'w') as f:
+            f.write(f"# Mock audio file - duration: {duration}s")
+    
+    @staticmethod
+    def cleanup_mock_files(file_paths: List[str]):
+        """Clean up mock files after testing"""
+        for file_path in file_paths:
+            try:
+                Path(file_path).unlink()
+            except FileNotFoundError:
+                pass
+
 
 @pytest.fixture
-def mock_gui_components():
-    """Mock GUI components for testing"""
-    from unittest.mock import Mock
-    
-    mock_app = Mock()
-    mock_window = Mock()
-    mock_widget = Mock()
-    
-    return {
-        'app': mock_app,
-        'window': mock_window,
-        'widget': mock_widget
-    }
-
-@pytest.fixture(scope="session")
-def test_data_dir():
-    """Directory for test data files"""
-    test_dir = Path(__file__).parent / 'data'
-    test_dir.mkdir(exist_ok=True)
-    return test_dir
-
-@pytest.fixture
-def mock_export_formats():
-    """Mock export format configurations"""
-    return {
-        'm3u': {
-            'extension': '.m3u',
-            'supports_metadata': False,
-            'encoding': 'utf-8'
-        },
-        'rekordbox_xml': {
-            'extension': '.xml',
-            'supports_metadata': True,
-            'encoding': 'utf-8'
-        },
-        'csv': {
-            'extension': '.csv',
-            'supports_metadata': True,
-            'encoding': 'utf-8'
-        }
-    }
+def test_utils():
+    """Test utility functions"""
+    return TestUtils

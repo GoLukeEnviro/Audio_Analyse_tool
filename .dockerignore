@@ -1,0 +1,46 @@
+# DJ Audio-Analyse-Tool Pro - Docker ignore file
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+venv/
+.venv/
+pip-log.txt
+pip-delete-this-directory.txt
+
+# Development
+.git/
+.gitignore
+*.md
+Dockerfile*
+.dockerignore
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs (keep structure but not content)
+logs/*.log
+
+# Cache (will be recreated)
+data/cache/*
+!data/cache/.gitkeep
+
+# Development dependencies
+requirements-dev.txt
+
+# Scripts (not needed in container)
+run_backend.bat
+run_backend.sh
+run_backend_dev.bat
