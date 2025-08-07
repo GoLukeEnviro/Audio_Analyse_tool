@@ -9,7 +9,7 @@ app:
 
 # Audio-Analyse-Einstellungen
 audio_analysis:
-  supported_formats: ["mp3", "wav", "flac", "m4a", "aac"]
+  supported_formats: ["mp3", "wav", "flac", "m4a", "aac", "aiff"]
   sample_rate: 44100
   hop_length: 512
   frame_size: 2048

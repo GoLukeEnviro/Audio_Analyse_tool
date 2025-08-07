@@ -3,7 +3,7 @@
 import os
 import logging
 import asyncio
-from typing import List, Optional
+from typing import List, Optional, Dict, Any
 from datetime import datetime
 from pathlib import Path
 
@@ -14,10 +14,10 @@ from ..models import (
     AnalysisStartRequest, AnalysisStatusResponse, AnalysisStatus,
     CacheStatsResponse, SuccessResponse, ErrorResponse
 )
-from ...core_engine.audio_analysis.analyzer import AudioAnalyzer
-from ...core_engine.data_management.cache_manager import CacheManager # Korrigierter Import
-from ...core_engine.mood_classifier.mood_classifier import MoodClassifier
-from ...config.settings import settings
+from core_engine.audio_analysis.analyzer import AudioAnalyzer
+from core_engine.data_management.cache_manager import CacheManager
+from core_engine.mood_classifier.mood_classifier import MoodClassifier
+from config.settings import settings
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -26,6 +26,7 @@ router = APIRouter()
 _analyzer = None
 _cache_manager = None
 _mood_classifier = None
+_active_analysis_tasks: Dict[str, Any] = {}
 
 
 def get_analyzer():
@@ -33,7 +34,7 @@ def get_analyzer():
     global _analyzer
     if _analyzer is None:
         _analyzer = AudioAnalyzer(
-            cache_dir=settings.get("audio_analysis.cache_dir"),
+            db_path=settings.get("audio_analysis.db_path", "data/database.db"),
             enable_multiprocessing=settings.get("audio_analysis.enable_multiprocessing", True)
         )
     return _analyzer

@@ -16,6 +16,7 @@ import {
 import SearchIcon from '@mui/icons-material/Search';
 import { MoodCategory } from '../../types/enums';
 import { formatMood } from '../../utils/formatters';
+import ResetFiltersButton from './ResetFiltersButton';
 
 interface FilterPanelProps {
   searchQuery: string;
@@ -48,11 +49,28 @@ const FilterPanel: React.FC<FilterPanelProps> = ({
   selectedKey,
   onKeyChange
 }) => {
+  const handleResetFilters = () => {
+    onSearchChange('');
+    onMoodChange('');
+    onKeyChange('');
+    onBpmRangeChange([60, 200]);
+    onEnergyRangeChange([0, 1]);
+  };
   return (
     <Paper sx={{ p: 3, mb: 3 }}>
-      <Typography variant="h6" gutterBottom>
-        Filter & Suche
-      </Typography>
+      <Stack direction="row" justifyContent="space-between" alignItems="center" sx={{ mb: 3 }}>
+        <Typography variant="h6">
+          Filter & Suche
+        </Typography>
+        <ResetFiltersButton
+          searchQuery={searchQuery}
+          selectedMood={selectedMood}
+          selectedKey={selectedKey}
+          bpmRange={bpmRange}
+          energyRange={energyRange}
+          onReset={handleResetFilters}
+        />
+      </Stack>
       
       <Stack spacing={3}>
         {/* Search */}

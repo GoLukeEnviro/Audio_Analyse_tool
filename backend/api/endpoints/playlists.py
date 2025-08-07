@@ -9,17 +9,17 @@ import os
 from fastapi import APIRouter, HTTPException, BackgroundTasks, Query
 from fastapi.responses import JSONResponse, FileResponse
 
-from backend.api.models import (
+from ..models import (
     PlaylistGenerationRequest, PlaylistGenerationResponse, PlaylistExportRequest, 
     PlaylistExportResponse, PlaylistPresetInfo, PlaylistPresetDetails,
     PresetsListResponse, PresetCreationRequest,
     SortingAlgorithm, ExportFormat, SuccessResponse, ErrorResponse,
-    Playlist # Importiere Playlist-Modell
+    Playlist, PlaylistGenerationStatus
 )
-from backend.core_engine.playlist_engine.playlist_engine import PlaylistEngine, PlaylistPreset, PlaylistRule
-from backend.core_engine.export.playlist_exporter import PlaylistExporter
-from backend.core_engine.data_management.database_manager import DatabaseManager
-from backend.config.settings import settings
+from core_engine.playlist_engine.playlist_engine import PlaylistEngine, PlaylistPreset, PlaylistRule
+from core_engine.export.playlist_exporter import PlaylistExporter
+from core_engine.data_management.database_manager import DatabaseManager
+from config.settings import settings
 
 logger = logging.getLogger(__name__)
 router = APIRouter()

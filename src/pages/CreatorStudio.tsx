@@ -19,13 +19,17 @@ import CreateIcon from '@mui/icons-material/Create';
 import DownloadIcon from '@mui/icons-material/Download';
 import { useGeneratePlaylistMutation, usePlaylistGenerationStatusQuery, useExportPlaylistMutation } from '../hooks/usePlaylistQuery';
 import { ExportFormat, SortingAlgorithm } from '../types/enums';
+import { useNotification } from '../components/common/NotificationProvider';
+import TrackSelector from '../components/tracks/TrackSelector';
 
 const CreatorStudio: React.FC = () => {
   const [targetDuration, setTargetDuration] = useState(60);
   const [selectedAlgorithm, setSelectedAlgorithm] = useState<SortingAlgorithm>(SortingAlgorithm.HYBRID_SMART);
   const [energyCurve, setEnergyCurve] = useState<number[]>([0.3, 0.6, 0.9, 0.7, 0.4]);
   const [currentTaskId, setCurrentTaskId] = useState<string>('');
+  const [selectedTracks, setSelectedTracks] = useState<string[]>([]);
 
+  const { showSuccess, showError, showWarning } = useNotification();
   const generatePlaylistMutation = useGeneratePlaylistMutation();
   const exportPlaylistMutation = useExportPlaylistMutation();
   
@@ -35,16 +39,14 @@ const CreatorStudio: React.FC = () => {
   );
 
   const handleGeneratePlaylist = async () => {
-    try {
-      // In a real app, you would select tracks from the library
-      const mockTrackPaths = [
-        '/music/track1.mp3',
-        '/music/track2.mp3',
-        '/music/track3.mp3'
-      ];
+    if (selectedTracks.length === 0) {
+      showError('Bitte wählen Sie mindestens einen Track aus.');
+      return;
+    }
 
+    try {
       const result = await generatePlaylistMutation.mutateAsync({
-        track_file_paths: mockTrackPaths,
+        track_file_paths: selectedTracks,
         target_duration_minutes: targetDuration,
         custom_rules: [{
           type: 'energy_curve',
@@ -53,13 +55,18 @@ const CreatorStudio: React.FC = () => {
       });
       
       setCurrentTaskId(result.task_id);
+      showSuccess(`Playlist-Generierung gestartet! Task ID: ${result.task_id}`);
     } catch (error) {
       console.error('Failed to generate playlist:', error);
+      showError(error instanceof Error ? error.message : 'Fehler beim Generieren der Playlist');
     }
   };
 
   const handleExportPlaylist = async (format: ExportFormat) => {
-    if (!generationStatus?.result) return;
+    if (!generationStatus?.result) {
+      showError('Keine Playlist zum Exportieren verfügbar');
+      return;
+    }
 
     try {
       const result = await exportPlaylistMutation.mutateAsync({
@@ -70,11 +77,13 @@ const CreatorStudio: React.FC = () => {
       });
 
       if (result.success) {
-        // In a real app, this would trigger a download
-        console.log('Export successful:', result);
+        showSuccess(`Playlist erfolgreich als ${format.toUpperCase()} exportiert`);
+      } else {
+        showError(result.error || 'Export fehlgeschlagen');
       }
     } catch (error) {
       console.error('Failed to export playlist:', error);
+      showError(error instanceof Error ? error.message : 'Fehler beim Exportieren der Playlist');
     }
   };
 
@@ -91,6 +100,13 @@ const CreatorStudio: React.FC = () => {
           Erstellen Sie intelligente Playlists basierend auf Audio-Features
         </Typography>
       </Box>
+
+      {/* Track Selection */}
+      <TrackSelector
+        selectedTracks={selectedTracks}
+        onSelectionChange={setSelectedTracks}
+        maxSelection={50}
+      />
 
       {/* Playlist Configuration */}
       <Card>
@@ -162,14 +178,21 @@ const CreatorStudio: React.FC = () => {
               size="large"
               startIcon={<CreateIcon />}
               onClick={handleGeneratePlaylist}
-              disabled={isGenerating || generatePlaylistMutation.isLoading}
+              disabled={selectedTracks.length === 0 || isGenerating || generatePlaylistMutation.isLoading}
             >
               {generatePlaylistMutation.isLoading ? 'Starte...' : 'Playlist generieren'}
             </Button>
             
             {generatePlaylistMutation.isError && (
               <Alert severity="error">
-                Fehler beim Generieren der Playlist. Stellen Sie sicher, dass genügend analysierte Tracks verfügbar sind.
+                <Typography variant="subtitle2" gutterBottom>
+                  Fehler beim Generieren der Playlist
+                </Typography>
+                <Typography variant="body2">
+                  {generatePlaylistMutation.error instanceof Error 
+                    ? generatePlaylistMutation.error.message 
+                    : 'Stellen Sie sicher, dass genügend analysierte Tracks verfügbar sind und das Backend läuft.'}
+                </Typography>
               </Alert>
             )}
           </Stack>

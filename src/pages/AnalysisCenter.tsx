@@ -14,6 +14,7 @@ import {
 import PlayArrowIcon from '@mui/icons-material/PlayArrow';
 import { useStartAnalysisMutation, useAnalysisStatusQuery, useCancelAnalysisMutation } from '../hooks/useAnalysisQuery';
 import ProgressMonitor from '../components/analysis/ProgressMonitor';
+import { useNotification } from '../components/common/NotificationProvider';
 
 const AnalysisCenter: React.FC = () => {
   const [directories, setDirectories] = useState<string>('');
@@ -21,16 +22,18 @@ const AnalysisCenter: React.FC = () => {
   const [overwriteCache, setOverwriteCache] = useState(false);
   const [currentTaskId, setCurrentTaskId] = useState<string>('');
 
+  const { showSuccess, showError } = useNotification();
   const startAnalysisMutation = useStartAnalysisMutation();
   const cancelAnalysisMutation = useCancelAnalysisMutation();
   
-  const { data: analysisStatus } = useAnalysisStatusQuery(
+  const { data: analysisStatus, isError: statusError } = useAnalysisStatusQuery(
     currentTaskId, 
     currentTaskId ? 2000 : 0
   );
 
   const handleStartAnalysis = async () => {
     if (!directories.trim()) {
+      showError('Bitte geben Sie mindestens ein Verzeichnis an.');
       return;
     }
 
@@ -42,8 +45,10 @@ const AnalysisCenter: React.FC = () => {
       });
       
       setCurrentTaskId(result.task_id);
+      showSuccess(`Analyse gestartet! Task ID: ${result.task_id}`);
     } catch (error) {
       console.error('Failed to start analysis:', error);
+      showError(error instanceof Error ? error.message : 'Fehler beim Starten der Analyse');
     }
   };
 
@@ -53,8 +58,10 @@ const AnalysisCenter: React.FC = () => {
     try {
       await cancelAnalysisMutation.mutateAsync(currentTaskId);
       setCurrentTaskId('');
+      showSuccess('Analyse erfolgreich abgebrochen');
     } catch (error) {
       console.error('Failed to cancel analysis:', error);
+      showError(error instanceof Error ? error.message : 'Fehler beim Abbrechen der Analyse');
     }
   };
 
@@ -141,7 +148,25 @@ const AnalysisCenter: React.FC = () => {
             
             {startAnalysisMutation.isError && (
               <Alert severity="error">
-                Fehler beim Starten der Analyse. Bitte überprüfen Sie die Verzeichnispfade.
+                <Typography variant="subtitle2" gutterBottom>
+                  Fehler beim Starten der Analyse
+                </Typography>
+                <Typography variant="body2">
+                  {startAnalysisMutation.error instanceof Error 
+                    ? startAnalysisMutation.error.message 
+                    : 'Bitte überprüfen Sie die Verzeichnispfade und stellen Sie sicher, dass das Backend läuft.'}
+                </Typography>
+              </Alert>
+            )}
+
+            {statusError && currentTaskId && (
+              <Alert severity="warning">
+                <Typography variant="subtitle2" gutterBottom>
+                  Verbindungsfehler
+                </Typography>
+                <Typography variant="body2">
+                  Kann den Analyse-Status nicht abrufen. Das Backend ist möglicherweise nicht erreichbar.
+                </Typography>
               </Alert>
             )}
           </Stack>
@@ -170,7 +195,7 @@ const AnalysisCenter: React.FC = () => {
             </Alert>
             
             <Typography variant="body2" color="text.secondary">
-              <strong>Unterstützte Formate:</strong> MP3, WAV, FLAC, M4A, AAC, OGG
+              <strong>Unterstützte Formate:</strong> MP3, WAV, FLAC, M4A, AAC, OGG, AIFF
             </Typography>
             
             <Typography variant="body2" color="text.secondary">

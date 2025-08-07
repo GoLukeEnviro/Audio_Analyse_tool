@@ -40,6 +40,13 @@ class ErrorBoundary extends React.Component<ErrorBoundaryProps, ErrorBoundarySta
             <Typography variant="body2" sx={{ mb: 2 }}>
               {this.state.error?.message || 'Ein unerwarteter Fehler ist aufgetreten.'}
             </Typography>
+            {process.env.NODE_ENV === 'development' && this.state.error?.stack && (
+              <Box sx={{ mt: 2, p: 2, backgroundColor: 'grey.900', borderRadius: 1 }}>
+                <Typography variant="caption" component="pre" sx={{ fontSize: '0.75rem', overflow: 'auto' }}>
+                  {this.state.error.stack}
+                </Typography>
+              </Box>
+            )}
             <Button
               variant="outlined"
               startIcon={<RefreshIcon />}

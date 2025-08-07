@@ -7,7 +7,11 @@ interface EnergyChartProps {
   data: {
     energy_value: number[];
     timestamps: number[];
-  };
+  } | Array<{
+    timestamp: number;
+    energy_value: number;
+    brightness_value?: number;
+  }>;
   title?: string;
   height?: number;
 }
@@ -19,12 +23,39 @@ const EnergyChart: React.FC<EnergyChartProps> = ({
 }) => {
   const theme = useTheme();
 
-  // Transform data for recharts
-  const chartData = data.energy_value.map((energy, index) => ({
-    time: data.timestamps[index],
-    energy: energy,
-    timeFormatted: `${Math.floor(data.timestamps[index] / 60)}:${(data.timestamps[index] % 60).toString().padStart(2, '0')}`
-  }));
+  // Transform data for recharts - handle both formats
+  const chartData = React.useMemo(() => {
+    if (Array.isArray(data)) {
+      // New format: array of objects
+      return data.map((point) => ({
+        time: point.timestamp,
+        energy: point.energy_value,
+        timeFormatted: `${Math.floor(point.timestamp / 60)}:${(point.timestamp % 60).toString().padStart(2, '0')}`
+      }));
+    } else {
+      // Legacy format: separate arrays
+      return data.energy_value.map((energy, index) => ({
+        time: data.timestamps[index],
+        energy: energy,
+        timeFormatted: `${Math.floor(data.timestamps[index] / 60)}:${(data.timestamps[index] % 60).toString().padStart(2, '0')}`
+      }));
+    }
+  }, [data]);
+
+  if (!chartData || chartData.length === 0) {
+    return (
+      <Paper sx={{ p: 3 }}>
+        <Typography variant="h6" gutterBottom>
+          {title}
+        </Typography>
+        <Box sx={{ width: '100%', height: height, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+          <Typography color="text.secondary">
+            Keine Zeitreihen-Daten verfügbar
+          </Typography>
+        </Box>
+      </Paper>
+    );
+  }
 
   const CustomTooltip = ({ active, payload, label }: any) => {
     if (active && payload && payload.length) {

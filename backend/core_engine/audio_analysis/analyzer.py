@@ -10,12 +10,20 @@ from concurrent.futures import ProcessPoolExecutor, as_completed
 import hashlib
 import asyncio
 
+try:
+    import essentia.standard as es
+    ESSENTIA_AVAILABLE = True
+    print("[INFO] Essentia-Modul erfolgreich geladen.")
+except ImportError:
+    ESSENTIA_AVAILABLE = False
+    print("[WARNUNG] Essentia-Modul nicht gefunden. Analyse läuft im librosa-Fallback-Modus.")
+
 import librosa
 import numpy as np
 from mutagen import File as MutagenFile
-from backend.core_engine.data_management.database_manager import DatabaseManager
-from backend.core_engine.audio_analysis.feature_extractor import FeatureExtractor
-from backend.core_engine.mood_classifier.mood_classifier import MoodClassifier # Neuer Import
+from ..data_management.database_manager import DatabaseManager
+from .feature_extractor import FeatureExtractor
+from ..mood_classifier.mood_classifier import MoodClassifier # Neuer Import
 
 logger = logging.getLogger(__name__)
 
@@ -31,7 +39,7 @@ class AudioAnalyzer:
         self.database_manager = DatabaseManager(str(self.db_path))
         
         # Feature Extractor
-        self.feature_extractor = FeatureExtractor(use_essentia=True) # Essentia standardmäßig aktivieren
+        self.feature_extractor = FeatureExtractor(use_essentia=ESSENTIA_AVAILABLE) # Essentia standardmäßig aktivieren
         
         # Mood Classifier
         self.mood_classifier = MoodClassifier() # Instanziierung des MoodClassifiers

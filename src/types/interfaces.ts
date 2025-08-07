@@ -47,14 +47,27 @@ export interface TrackDetails {
     camelot: string;
     compatible_keys: string[];
   };
-  time_series_features: {
+  time_series_features?: {
     energy_value: number[];
     timestamps: number[];
-  };
+  } | Array<{
+    timestamp: number;
+    energy_value: number;
+    brightness_value?: number;
+    spectral_rolloff?: number;
+    rms_energy?: number;
+  }>;
   mood: {
     primary_mood: MoodCategory;
     confidence: number;
     scores: Record<string, number>;
+    explanation?: string;
+  };
+  derived_metrics?: {
+    energy_level: string;
+    bpm_category: string;
+    estimated_mood: string;
+    danceability_level: string;
   };
 }
 

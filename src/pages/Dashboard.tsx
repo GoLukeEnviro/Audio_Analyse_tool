@@ -5,40 +5,48 @@ import {
   Card,
   CardContent,
   Box,
-  Chip
+  Chip,
+  Alert
 } from '@mui/material';
+import { useNavigate } from 'react-router-dom';
 import LibraryMusicIcon from '@mui/icons-material/LibraryMusic';
 import AnalyticsIcon from '@mui/icons-material/Analytics';
 import PlaylistPlayIcon from '@mui/icons-material/PlaylistPlay';
 import TrendingUpIcon from '@mui/icons-material/TrendingUp';
-import { useTracksQuery } from '../hooks/useTracksQuery';
+import { useTracksQuery, useTracksStatsQuery } from '../hooks/useTracksQuery';
+import { useAnalysisStatsQuery } from '../hooks/useAnalysisQuery';
 import LoadingSkeleton from '../components/common/LoadingSkeleton';
 
 const Dashboard: React.FC = () => {
-  const { data: tracksData, isLoading } = useTracksQuery();
+  const navigate = useNavigate();
+  const { data: tracksData, isLoading: tracksLoading, isError: tracksError } = useTracksQuery({ per_page: 1 });
+  const { data: tracksStats, isLoading: statsLoading } = useTracksStatsQuery({ refetchInterval: 30000 });
+  const { data: analysisStats } = useAnalysisStatsQuery({ refetchInterval: 30000 });
+
+  const isLoading = tracksLoading || statsLoading;
 
   const statsCards = [
     {
       title: 'Analysierte Tracks',
-      value: tracksData?.total_count || 0,
+      value: tracksStats?.total_tracks || tracksData?.total_count || 0,
       icon: <LibraryMusicIcon />,
       color: 'primary.main'
     },
     {
       title: 'Durchschnittliche BPM',
-      value: '126',
+      value: tracksStats?.statistics?.average_bpm ? Math.round(tracksStats.statistics.average_bpm) : '---',
       icon: <TrendingUpIcon />,
       color: 'secondary.main'
     },
     {
-      title: 'Generierte Playlists',
-      value: '12',
+      title: 'Cache Hit Rate',
+      value: analysisStats?.analyzer_stats?.cache_hit_rate ? `${analysisStats.analyzer_stats.cache_hit_rate}%` : '---',
       icon: <PlaylistPlayIcon />,
       color: 'success.main'
     },
     {
-      title: 'Analyse-Sessions',
-      value: '5',
+      title: 'Laufende Analysen',
+      value: analysisStats?.current_session?.running_tasks || 0,
       icon: <AnalyticsIcon />,
       color: 'warning.main'
     }
@@ -46,6 +54,16 @@ const Dashboard: React.FC = () => {
 
   if (isLoading) {
     return <LoadingSkeleton variant="dashboard-cards" count={4} />;
+  }
+
+  if (tracksError) {
+    return (
+      <Stack spacing={3}>
+        <Alert severity="error">
+          Fehler beim Laden der Dashboard-Daten. Stellen Sie sicher, dass das Backend läuft.
+        </Alert>
+      </Stack>
+    );
   }
 
   return (
@@ -97,24 +115,28 @@ const Dashboard: React.FC = () => {
               clickable 
               color="primary" 
               variant="outlined"
+              onClick={() => navigate('/analysis-center')}
             />
             <Chip 
               label="Playlist generieren" 
               clickable 
               color="secondary" 
               variant="outlined"
+              onClick={() => navigate('/creator-studio')}
             />
             <Chip 
               label="Bibliothek durchsuchen" 
               clickable 
               color="info" 
               variant="outlined"
+              onClick={() => navigate('/library')}
             />
             <Chip 
               label="Einstellungen" 
               clickable 
               color="default" 
               variant="outlined"
+              onClick={() => navigate('/settings')}
             />
           </Stack>
         </CardContent>

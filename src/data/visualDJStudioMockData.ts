@@ -15,7 +15,7 @@ export const mockStore = {
   analysisSettings: {
     enableMultiprocessing: true,
     cacheDir: "/cache/audio",
-    supportedFormats: [".mp3", ".wav", ".flac", ".m4a"]
+    supportedFormats: [".mp3", ".wav", ".flac", ".m4a", ".aiff"]
   }
 };
 

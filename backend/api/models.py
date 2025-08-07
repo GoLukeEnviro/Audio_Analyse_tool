@@ -8,24 +8,19 @@ from pydantic import BaseModel, Field, validator
 
 # Enums
 class SortingAlgorithm(str, Enum):
-    harmonic = "harmonic"
-    energy_flow = "energy_flow"
-    mood_progression = "mood_progression"
-    bpm_transition = "bpm_transition"
-    key_progression = "key_progression"
     hybrid_smart = "hybrid_smart"
-    custom = "custom"
+    bpm_progression = "bpm_progression"
+    energy_flow = "energy_flow"
+    harmonic_mixing = "harmonic_mixing"
+    mood_journey = "mood_journey"
 
 
 class MoodCategory(str, Enum):
-    euphoric = "euphoric"
-    driving = "driving"
-    dark = "dark"
-    chill = "chill"
+    energetic = "energetic"
+    happy = "happy"
+    calm = "calm"
     melancholic = "melancholic"
     aggressive = "aggressive"
-    uplifting = "uplifting"
-    mysterious = "mysterious"
     neutral = "neutral"
 
 
@@ -44,19 +39,22 @@ class AnalysisStatus(str, Enum):
     cancelled = "cancelled"
 
 
+class PlaylistGenerationStatus(str, Enum):
+    loading_tracks = "loading_tracks"
+    generating = "generating"
+    completed = "completed"
+    error = "error"
+
+
 # Base Models
 class AudioFeatures(BaseModel):
     """Audio features extracted from track analysis"""
+    bpm: float = Field(..., gt=0, le=300, description="Beats per minute")
     energy: float = Field(..., ge=0.0, le=1.0, description="Energy level (0-1)")
     valence: float = Field(..., ge=0.0, le=1.0, description="Musical positiveness (0-1)")
     danceability: float = Field(..., ge=0.0, le=1.0, description="Danceability (0-1)")
-    bpm: float = Field(..., gt=0, le=300, description="Beats per minute")
-    key_numeric: float = Field(..., ge=0.0, le=11.0, description="Key as numeric value")
-    mode: str = Field(..., description="Major or minor mode")
-    loudness: float = Field(..., description="Loudness in dB")
-    spectral_centroid: float = Field(..., ge=0.0, description="Spectral centroid")
-    zero_crossing_rate: float = Field(..., ge=0.0, le=1.0, description="Zero crossing rate")
-    mfcc_variance: float = Field(..., ge=0.0, description="MFCC variance")
+    acousticness: float = Field(..., ge=0.0, le=1.0, description="Acousticness (0-1)")
+    instrumentalness: float = Field(..., ge=0.0, le=1.0, description="Instrumentalness (0-1)")
 
 
 class TrackMetadata(BaseModel):
@@ -64,13 +62,10 @@ class TrackMetadata(BaseModel):
     title: Optional[str] = Field(None, description="Track title")
     artist: Optional[str] = Field(None, description="Artist name")
     album: Optional[str] = Field(None, description="Album name")
-    genre: Optional[str] = Field(None, description="Genre")
-    year: Optional[str] = Field(None, description="Release year")
     duration: float = Field(..., gt=0, description="Duration in seconds")
     file_size: int = Field(..., gt=0, description="File size in bytes")
-    file_path: str = Field(..., description="Full file path")
-    filename: str = Field(..., description="File name")
-    extension: str = Field(..., description="File extension")
+    format: str = Field(..., description="Audio format")
+    bitrate: Optional[int] = Field(None, description="Bitrate")
     analyzed_at: float = Field(..., description="Analysis timestamp")
 
 
@@ -103,14 +98,12 @@ class Track(BaseModel):
     """Complete track information"""
     file_path: str = Field(..., description="Full path to audio file")
     filename: str = Field(..., description="File name")
-    features: AudioFeatures = Field(..., description="Extracted audio features")
     metadata: TrackMetadata = Field(..., description="Track metadata")
+    features: AudioFeatures = Field(..., description="Extracted audio features")
     camelot: CamelotInfo = Field(..., description="Camelot Wheel information")
-    derived_metrics: DerivedMetrics = Field(..., description="Derived metrics")
-    mood: Optional[MoodAnalysis] = Field(None, description="Mood analysis results")
-    errors: List[str] = Field(default_factory=list, description="Analysis errors")
-    status: AnalysisStatus = Field(..., description="Analysis status")
-    version: str = Field(default="2.0", description="Analysis version")
+    time_series_features: Optional[Union[Dict[str, List], List[Dict]]] = Field(None, description="Time series data")
+    mood: MoodAnalysis = Field(..., description="Mood analysis results")
+    derived_metrics: Optional[DerivedMetrics] = Field(None, description="Derived metrics")
 
 
 class TrackSummary(BaseModel):
@@ -124,7 +117,7 @@ class TrackSummary(BaseModel):
     key: str
     camelot: str
     energy: float
-    mood: Optional[str] = None
+    mood: Optional[MoodCategory] = None
     analyzed_at: float
 
 
@@ -174,22 +167,18 @@ class PlaylistMetadata(BaseModel):
 
 class Playlist(BaseModel):
     """Complete playlist"""
-    tracks: List[Track] = Field(..., description="Playlist tracks in order")
-    metadata: PlaylistMetadata = Field(..., description="Playlist metadata")
-    preset_used: str = Field(..., description="Preset name used")
-    algorithm: SortingAlgorithm = Field(..., description="Algorithm used")
-    rules_applied: List[Dict[str, float]] = Field(..., description="Applied rules with weights")
-    created_at: str = Field(..., description="Creation timestamp")
-    status: str = Field(..., description="Generation status")
+    playlist_id: str = Field(..., description="Playlist ID")
+    tracks: List[Dict[str, Any]] = Field(..., description="Playlist tracks in order")
+    metadata: Dict[str, Any] = Field(..., description="Playlist metadata")
 
 
 # Request Models
 class AnalysisStartRequest(BaseModel):
     """Request to start audio analysis"""
-    directories: List[str] = Field(..., min_items=1, description="Directories to scan")
+    directories: Optional[List[str]] = Field(None, description="Directories to scan")
     file_paths: Optional[List[str]] = Field(None, description="Specific files to analyze")
-    recursive: bool = Field(default=True, description="Scan subdirectories")
-    overwrite_cache: bool = Field(default=False, description="Overwrite existing cache")
+    recursive: Optional[bool] = Field(default=True, description="Scan subdirectories")
+    overwrite_cache: Optional[bool] = Field(default=False, description="Overwrite existing cache")
     include_patterns: Optional[List[str]] = Field(None, description="File patterns to include")
     exclude_patterns: Optional[List[str]] = Field(None, description="File patterns to exclude")
 
@@ -260,7 +249,7 @@ class TrackDetailsResponse(BaseModel):
 class PlaylistGenerationResponse(BaseModel):
     """Playlist generation response"""
     success: bool = Field(..., description="Generation success")
-    playlist: Optional[Playlist] = Field(None, description="Generated playlist")
+    playlist: Optional[Dict[str, Any]] = Field(None, description="Generated playlist")
     error: Optional[str] = Field(None, description="Error message")
     generation_time_seconds: float = Field(..., ge=0, description="Generation time")
 

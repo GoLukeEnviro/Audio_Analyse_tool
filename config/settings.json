@@ -6,7 +6,8 @@
     "supported_formats": [
       "mp3",
       "wav",
-      "flac"
+      "flac",
+      "aiff"
     ]
   },
   "analysis": {

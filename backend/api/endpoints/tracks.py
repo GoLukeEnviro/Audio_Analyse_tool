@@ -8,14 +8,14 @@ from pathlib import Path
 from fastapi import APIRouter, HTTPException, Query, Depends
 from fastapi.responses import JSONResponse
 
-from backend.api.models import (
+from ..models import (
     Track, TrackSummary, TracksListResponse, TrackDetailsResponse,
     TracksQueryParams, ErrorResponse, MoodCategory
 )
-from backend.core_engine.audio_analysis.analyzer import AudioAnalyzer
-from backend.core_engine.data_management.database_manager import DatabaseManager
-from backend.core_engine.mood_classifier.mood_classifier import MoodClassifier
-from backend.config.settings import settings
+from core_engine.audio_analysis.analyzer import AudioAnalyzer
+from core_engine.data_management.database_manager import DatabaseManager
+from core_engine.mood_classifier.mood_classifier import MoodClassifier
+from config.settings import settings
 
 logger = logging.getLogger(__name__)
 router = APIRouter()

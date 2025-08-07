@@ -37,30 +37,15 @@ logger = logging.getLogger(__name__)
 async def lifespan(app: FastAPI):
     """FastAPI lifespan events"""
     # Startup
-    logger.info("🚀 DJ Audio-Analyse-Tool Backend gestartet")
-    logger.info(f"📁 Cache-Verzeichnis: {settings.get('audio_analysis.cache_dir')}")
-    logger.info(f"📁 Preset-Verzeichnis: {settings.get('playlist_engine.presets_dir')}")
-    logger.info(f"📁 Export-Verzeichnis: {settings.get('export.output_dir')}")
-    
-    # Cache cleanup on startup if enabled
-    if settings.get("cache.cleanup_on_startup", True):
-        logger.info("🧹 Starte Cache-Cleanup...")
-        try:
-            from core_engine.audio_analysis.cache_manager import CacheManager
-            cache_manager = CacheManager(settings.get("audio_analysis.cache_dir"))
-            cleanup_result = cache_manager.cleanup_cache(
-                max_age_days=settings.get("cache.max_age_days", 30),
-                max_size_mb=settings.get("cache.max_size_mb", 1000)
-            )
-            logger.info(f"✅ Cache-Cleanup abgeschlossen: {cleanup_result['removed_files']} Dateien entfernt, "
-                       f"{cleanup_result['freed_mb']:.1f} MB freigegeben")
-        except Exception as e:
-            logger.warning(f"⚠️ Cache-Cleanup fehlgeschlagen: {e}")
+    logger.info("[INFO] DJ Audio-Analyse-Tool Backend gestartet")
+    logger.info(f"[INFO] Cache-Verzeichnis: {settings.get('audio_analysis.cache_dir')}")
+    logger.info(f"[INFO] Preset-Verzeichnis: {settings.get('playlist_engine.presets_dir')}")
+    logger.info(f"[INFO] Export-Verzeichnis: {settings.get('export.output_dir')}")
     
     yield
     
     # Shutdown
-    logger.info("🛑 Backend wird heruntergefahren...")
+    logger.info("[INFO] Backend wird heruntergefahren...")
 
 
 # Create FastAPI app
@@ -228,7 +213,7 @@ def main():
     """Run the FastAPI server"""
     server_config = settings.get_server_config()
     
-    logger.info(f"🌟 Starte DJ Audio-Analyse-Tool Backend Server")
+    logger.info(f"[INFO] Starte DJ Audio-Analyse-Tool Backend Server")
     logger.info(f"📍 Host: {server_config.get('host', '127.0.0.1')}")
     logger.info(f"🔌 Port: {server_config.get('port', 8000)}")
     logger.info(f"🔧 Debug-Modus: {settings.is_development()}")

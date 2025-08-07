@@ -3,7 +3,8 @@ import {
   Typography,
   Stack,
   Box,
-  Pagination
+  Pagination,
+  Alert
 } from '@mui/material';
 import { useNavigate } from 'react-router-dom';
 import { useTracksQuery } from '../hooks/useTracksQuery';
@@ -21,7 +22,7 @@ const Library: React.FC = () => {
   const [selectedKey, setSelectedKey] = useState('');
   const [currentPage, setCurrentPage] = useState(1);
 
-  const { data: tracksData, isLoading, isError } = useTracksQuery({
+  const { data: tracksData, isLoading, isError, error } = useTracksQuery({
     page: currentPage,
     per_page: 20,
     search: searchQuery || undefined,
@@ -47,11 +48,24 @@ const Library: React.FC = () => {
 
   if (isError) {
     return (
-      <Box sx={{ p: 3 }}>
-        <Typography color="error">
-          Fehler beim Laden der Tracks. Bitte versuchen Sie es erneut.
-        </Typography>
-      </Box>
+      <Stack spacing={3}>
+        <Box>
+          <Typography variant="h4" gutterBottom>
+            Bibliothek
+          </Typography>
+        </Box>
+        <Alert severity="error">
+          <Typography variant="h6" gutterBottom>
+            Fehler beim Laden der Tracks
+          </Typography>
+          <Typography variant="body2">
+            {error instanceof Error ? error.message : 'Unbekannter Fehler aufgetreten'}
+          </Typography>
+          <Typography variant="body2" sx={{ mt: 1 }}>
+            Stellen Sie sicher, dass das Backend unter http://localhost:8000 läuft und Tracks analysiert wurden.
+          </Typography>
+        </Alert>
+      </Stack>
     );
   }
 

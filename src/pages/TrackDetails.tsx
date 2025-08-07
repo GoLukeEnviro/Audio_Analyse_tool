@@ -10,7 +10,8 @@ import {
   TableBody,
   TableCell,
   TableRow,
-  Button
+  Button,
+  Alert
 } from '@mui/material';
 import { useParams, useNavigate } from 'react-router-dom';
 import ArrowBackIcon from '@mui/icons-material/ArrowBack';
@@ -24,7 +25,7 @@ const TrackDetails: React.FC = () => {
   const { trackId } = useParams<{ trackId: string }>();
   const navigate = useNavigate();
   
-  const { data: trackDetails, isLoading, isError } = useTrackDetailsQuery(
+  const { data: trackDetails, isLoading, isError, error } = useTrackDetailsQuery(
     trackId ? decodeURIComponent(trackId) : '',
     true
   );
@@ -39,14 +40,22 @@ const TrackDetails: React.FC = () => {
 
   if (isError || !trackDetails) {
     return (
-      <Box sx={{ p: 3 }}>
-        <Button startIcon={<ArrowBackIcon />} onClick={handleBack} sx={{ mb: 2 }}>
+      <Stack spacing={3}>
+        <Button startIcon={<ArrowBackIcon />} onClick={handleBack}>
           Zurück zur Bibliothek
         </Button>
-        <Typography color="error">
-          Track nicht gefunden oder Fehler beim Laden.
-        </Typography>
-      </Box>
+        <Alert severity="error">
+          <Typography variant="h6" gutterBottom>
+            Track nicht gefunden
+          </Typography>
+          <Typography variant="body2">
+            {error instanceof Error ? error.message : 'Track konnte nicht geladen werden'}
+          </Typography>
+          <Typography variant="body2" sx={{ mt: 1 }}>
+            Möglicherweise wurde der Track noch nicht analysiert oder die Datei existiert nicht mehr.
+          </Typography>
+        </Alert>
+      </Stack>
     );
   }
 
