@@ -2,8 +2,11 @@
 
 import logging
 import numpy as np
-from typing import Dict, Any, Optional
+from typing import Dict, Any, Optional, Tuple, List
 import librosa
+from mutagen import File as MutagenFile
+import os
+from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
@@ -27,6 +30,14 @@ class FeatureExtractor:
             logger.info("FeatureExtractor mit Essentia initialisiert")
         else:
             logger.info("FeatureExtractor nur mit librosa initialisiert")
+        
+        # Camelot Wheel mapping
+        self.camelot_wheel = {
+            'C': '8B', 'G': '9B', 'D': '10B', 'A': '11B', 'E': '12B', 'B': '1B',
+            'F#': '2B', 'C#': '3B', 'G#': '4B', 'D#': '5B', 'A#': '6B', 'F': '7B',
+            'Am': '8A', 'Em': '9A', 'Bm': '10A', 'F#m': '11A', 'C#m': '12A', 'G#m': '1A',
+            'D#m': '2A', 'A#m': '3A', 'Fm': '4A', 'Cm': '5A', 'Gm': '6A', 'Dm': '7A'
+        }
     
     def _init_essentia_algorithms(self):
         """Initialisiert Essentia-Algorithmen"""
@@ -113,11 +124,11 @@ class FeatureExtractor:
             features['key_confidence'] = float(chroma_mean[key_index])
             
             # Mode detection (major/minor)
-            major_profile = np.array([1, 0, 1, 0, 1, 1, 0, 1, 0, 1, 0, 1])
-            minor_profile = np.array([1, 0, 1, 1, 0, 1, 0, 1, 1, 0, 1, 0])
+            major_profile = np.array([6.35, 2.23, 3.48, 2.33, 4.38, 4.09, 2.52, 5.19, 2.39, 3.66, 2.29, 2.88])
+            minor_profile = np.array([6.33, 2.68, 3.52, 5.38, 2.60, 3.53, 2.54, 4.75, 3.98, 2.69, 3.34, 3.17])
             
-            major_corr = np.corrcoef(chroma_mean, major_profile)[0, 1] if len(chroma_mean) == 12 else 0
-            minor_corr = np.corrcoef(chroma_mean, minor_profile)[0, 1] if len(chroma_mean) == 12 else 0
+            major_corr = np.corrcoef(chroma_mean, major_profile) if len(chroma_mean) == 12 else 0
+            minor_corr = np.corrcoef(chroma_mean, minor_profile) if len(chroma_mean) == 12 else 0
             
             features['mode'] = 'major' if major_corr > minor_corr else 'minor'
             features['mode_confidence'] = float(abs(major_corr - minor_corr))
@@ -151,24 +162,24 @@ class FeatureExtractor:
         
         try:
             # Spectral centroid
-            spectral_centroids = librosa.feature.spectral_centroid(y=y, sr=sr)[0]
+            spectral_centroids = librosa.feature.spectral_centroid(y=y, sr=sr)
             features['spectral_centroid'] = float(np.mean(spectral_centroids))
             features['spectral_centroid_variance'] = float(np.var(spectral_centroids))
             
             # Spectral rolloff
-            spectral_rolloff = librosa.feature.spectral_rolloff(y=y, sr=sr)[0]
+            spectral_rolloff = librosa.feature.spectral_rolloff(y=y, sr=sr)
             features['spectral_rolloff'] = float(np.mean(spectral_rolloff))
             
             # Zero crossing rate
-            zcr = librosa.feature.zero_crossing_rate(y)[0]
+            zcr = librosa.feature.zero_crossing_rate(y)
             features['zero_crossing_rate'] = float(np.mean(zcr))
             
             # Spectral bandwidth
-            spectral_bandwidth = librosa.feature.spectral_bandwidth(y=y, sr=sr)[0]
+            spectral_bandwidth = librosa.feature.spectral_bandwidth(y=y, sr=sr)
             features['spectral_bandwidth'] = float(np.mean(spectral_bandwidth))
             
             # Spectral flatness
-            spectral_flatness = librosa.feature.spectral_flatness(y=y)[0]
+            spectral_flatness = librosa.feature.spectral_flatness(y=y)
             features['spectral_flatness'] = float(np.mean(spectral_flatness))
             
             # MFCC features
@@ -203,7 +214,7 @@ class FeatureExtractor:
         
         try:
             # RMS Energy
-            rms = librosa.feature.rms(y=y)[0]
+            rms = librosa.feature.rms(y=y)
             features['energy'] = float(np.mean(rms))
             features['energy_variance'] = float(np.var(rms))
             
@@ -244,11 +255,11 @@ class FeatureExtractor:
             chroma_mean = np.mean(chroma, axis=1)
             
             # Major/minor correlation for valence
-            major_profile = np.array([1, 0, 1, 0, 1, 1, 0, 1, 0, 1, 0, 1])
-            major_corr = np.corrcoef(chroma_mean, major_profile)[0, 1] if len(chroma_mean) == 12 else 0.5
+            major_profile = np.array([6.35, 2.23, 3.48, 2.33, 4.38, 4.09, 2.52, 5.19, 2.39, 3.66, 2.29, 2.88])
+            major_corr = np.corrcoef(chroma_mean, major_profile) if len(chroma_mean) == 12 else 0.5
             
             # RMS for energy component
-            rms = librosa.feature.rms(y=y)[0]
+            rms = librosa.feature.rms(y=y)
             energy = np.mean(rms)
             
             # Combine for valence estimation
@@ -300,3 +311,106 @@ class FeatureExtractor:
         all_features.update(perceptual_features)
         
         return all_features
+
+    def estimate_key(self, y: np.ndarray, sr: int) -> Tuple[str, str]:
+        """Schätzt Tonart mit Krumhansl-Schmuckler Algorithmus"""
+        chroma = librosa.feature.chroma_stft(y=y, sr=sr)
+        chroma_mean = np.mean(chroma, axis=1)
+        
+        # Key templates (Krumhansl-Schmuckler)
+        major_template = np.array([6.35, 2.23, 3.48, 2.33, 4.38, 4.09, 2.52, 5.19, 2.39, 3.66, 2.29, 2.88])
+        minor_template = np.array([6.33, 2.68, 3.52, 5.38, 2.60, 3.53, 2.54, 4.75, 3.98, 2.69, 3.34, 3.17])
+        
+        key_names = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B']
+        
+        major_correlations = []
+        minor_correlations = []
+        
+        for i in range(12):
+            major_shifted = np.roll(major_template, i)
+            minor_shifted = np.roll(minor_template, i)
+            
+            major_corr = np.corrcoef(chroma_mean, major_shifted)
+            minor_corr = np.corrcoef(chroma_mean, minor_shifted)
+            
+            major_correlations.append(major_corr)
+            minor_correlations.append(minor_corr)
+        
+        max_major_idx = np.argmax(major_correlations)
+        max_minor_idx = np.argmax(minor_correlations)
+        
+        if major_correlations[max_major_idx] > minor_correlations[max_minor_idx]:
+            key = key_names[max_major_idx]
+        else:
+            key = key_names[max_minor_idx] + 'm'
+        
+        camelot = self.camelot_wheel.get(key, 'Unknown')
+        return key, camelot
+    
+    def estimate_energy(self, y: np.ndarray) -> float:
+        """Schätzt Energie des Tracks"""
+        rms = librosa.feature.rms(y=y)
+        return float(np.mean(rms))
+    
+    def estimate_brightness(self, y: np.ndarray, sr: int) -> float:
+        """Schätzt Helligkeit/Spektrum des Tracks"""
+        spectral_centroids = librosa.feature.spectral_centroid(y=y, sr=sr)
+        return float(np.mean(spectral_centroids))
+
+    def extract_metadata(self, file_path: str) -> Dict[str, Any]:
+        """Extrahiert Metadaten aus Audio-Datei"""
+        metadata = {}
+        
+        try:
+            # Mutagen für ID3-Tags
+            audio_file = MutagenFile(file_path)
+            if audio_file is not None:
+                metadata.update({
+                    'title': str(audio_file.get('TIT2', [''])) if audio_file.get('TIT2') else os.path.splitext(os.path.basename(file_path)),
+                    'artist': str(audio_file.get('TPE1', [''])) if audio_file.get('TPE1') else 'Unknown',
+                    'album': str(audio_file.get('TALB', [''])) if audio_file.get('TALB') else 'Unknown',
+                    'genre': str(audio_file.get('TCON', [''])) if audio_file.get('TCON') else 'Unknown',
+                    'year': str(audio_file.get('TDRC', [''])) if audio_file.get('TDRC') else None,
+                })
+            
+            # Datei-Informationen
+            file_stats = os.stat(file_path)
+            metadata.update({
+                'file_size': file_stats.st_size,
+                'file_path': file_path,
+                'filename': os.path.basename(file_path),
+                'extension': Path(file_path).suffix.lower(),
+                'analyzed_at': file_stats.st_mtime
+            })
+            
+        except Exception as e:
+            logger.error(f"Fehler bei Metadaten-Extraktion: {e}")
+        
+        return metadata
+    
+    def get_compatible_keys(self, camelot: str) -> List[str]:
+        """Gibt harmonisch kompatible Keys zurück"""
+        if not camelot or len(camelot) < 2:
+            return []
+        
+        try:
+            number = int(camelot[:-1])
+            letter = camelot[-1]
+        except (ValueError, IndexError):
+            return []
+        
+        compatible = []
+        
+        # Gleiche Nummer, andere Modalität (relative Dur/Moll)
+        if letter == 'A':
+            compatible.append(f"{number}B")
+        else:
+            compatible.append(f"{number}A")
+        
+        # +1 und -1 (Quintenzirkel)
+        next_num = (number % 12) + 1
+        prev_num = ((number - 2) % 12) + 1
+        
+        compatible.extend([f"{next_num}{letter}", f"{prev_num}{letter}"])
+        
+        return compatible

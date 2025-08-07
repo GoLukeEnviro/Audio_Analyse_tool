@@ -7,6 +7,7 @@ import asyncio
 import tempfile
 import os
 import json
+import sqlite3
 from pathlib import Path
 from typing import Generator, Dict, List
 from unittest.mock import Mock, AsyncMock
@@ -16,12 +17,18 @@ from fastapi.testclient import TestClient
 from httpx import AsyncClient
 
 # Import backend components
-import sys
-backend_root = Path(__file__).parent.parent / "backend"
-sys.path.insert(0, str(backend_root))
+# import sys
+# project_root = Path(__file__).parent.parent
+# sys.path.insert(0, str(project_root))
 
-from main import app
-from config.settings import settings
+# Import backend components (conditional for testing)
+try:
+    from backend.main import app
+    from backend.config.settings import settings
+except ImportError:
+    # For isolated testing without full backend setup
+    app = None
+    settings = {}
 
 
 @pytest.fixture(scope="session")
@@ -70,6 +77,205 @@ def temp_export_dir():
         export_dir = Path(temp_dir) / "exports"
         export_dir.mkdir()
         yield str(export_dir)
+
+
+@pytest.fixture
+def test_database():
+    """In-memory SQLite database for testing"""
+    # Create an in-memory database
+    connection = sqlite3.connect(":memory:")
+    connection.row_factory = sqlite3.Row
+    
+    # Create test schema
+    cursor = connection.cursor()
+    
+    # Tracks table
+    cursor.execute("""
+        CREATE TABLE tracks (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            file_path TEXT UNIQUE NOT NULL,
+            filename TEXT NOT NULL,
+            title TEXT,
+            artist TEXT,
+            album TEXT,
+            genre TEXT,
+            year TEXT,
+            duration REAL NOT NULL,
+            file_size INTEGER NOT NULL,
+            extension TEXT NOT NULL,
+            created_at REAL DEFAULT (datetime('now')),
+            updated_at REAL DEFAULT (datetime('now'))
+        )
+    """)
+    
+    # Global features table
+    cursor.execute("""
+        CREATE TABLE global_features (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            track_id INTEGER NOT NULL,
+            bpm REAL NOT NULL,
+            key_name TEXT,
+            camelot TEXT,
+            key_confidence REAL,
+            energy REAL NOT NULL,
+            valence REAL NOT NULL,
+            danceability REAL NOT NULL,
+            loudness REAL,
+            spectral_centroid REAL,
+            zero_crossing_rate REAL,
+            mfcc_variance REAL,
+            primary_mood TEXT,
+            mood_confidence REAL,
+            mood_scores TEXT,  -- JSON string
+            energy_level TEXT,
+            bpm_category TEXT,
+            analyzed_at REAL DEFAULT (datetime('now')),
+            FOREIGN KEY (track_id) REFERENCES tracks (id) ON DELETE CASCADE
+        )
+    """)
+    
+    # Time series features table (NEW)
+    cursor.execute("""
+        CREATE TABLE time_series_features (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            track_id INTEGER NOT NULL,
+            timestamp REAL NOT NULL,  -- Time offset in seconds
+            energy_value REAL,
+            brightness_value REAL,
+            spectral_rolloff REAL,
+            rms_energy REAL,
+            created_at REAL DEFAULT (datetime('now')),
+            FOREIGN KEY (track_id) REFERENCES tracks (id) ON DELETE CASCADE
+        )
+    """)
+    
+    # Analysis tasks table (for background job tracking)
+    cursor.execute("""
+        CREATE TABLE analysis_tasks (
+            id TEXT PRIMARY KEY,
+            status TEXT NOT NULL DEFAULT 'pending',
+            progress REAL DEFAULT 0,
+            message TEXT,
+            started_at REAL,
+            completed_at REAL,
+            error_message TEXT,
+            total_files INTEGER DEFAULT 0,
+            processed_files INTEGER DEFAULT 0
+        )
+    """)
+    
+    connection.commit()
+    
+    yield connection
+    
+    connection.close()
+
+
+@pytest.fixture
+def test_database_file():
+    """Temporary SQLite database file for testing"""
+    with tempfile.NamedTemporaryFile(suffix='.db', delete=False) as temp_db:
+        db_path = temp_db.name
+    
+    # Create test database
+    connection = sqlite3.connect(db_path)
+    connection.row_factory = sqlite3.Row
+    
+    # Create test schema (same as above)
+    cursor = connection.cursor()
+    
+    cursor.execute("""
+        CREATE TABLE tracks (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            file_path TEXT UNIQUE NOT NULL,
+            filename TEXT NOT NULL,
+            title TEXT,
+            artist TEXT,
+            album TEXT,
+            genre TEXT,
+            year TEXT,
+            duration REAL NOT NULL,
+            file_size INTEGER NOT NULL,
+            extension TEXT NOT NULL,
+            created_at REAL DEFAULT (datetime('now')),
+            updated_at REAL DEFAULT (datetime('now'))
+        )
+    """)
+    
+    cursor.execute("""
+        CREATE TABLE global_features (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            track_id INTEGER NOT NULL,
+            bpm REAL NOT NULL,
+            key_name TEXT,
+            camelot TEXT,
+            key_confidence REAL,
+            energy REAL NOT NULL,
+            valence REAL NOT NULL,
+            danceability REAL NOT NULL,
+            loudness REAL,
+            spectral_centroid REAL,
+            zero_crossing_rate REAL,
+            mfcc_variance REAL,
+            primary_mood TEXT,
+            mood_confidence REAL,
+            mood_scores TEXT,  -- JSON string
+            energy_level TEXT,
+            bpm_category TEXT,
+            analyzed_at REAL DEFAULT (datetime('now')),
+            FOREIGN KEY (track_id) REFERENCES tracks (id) ON DELETE CASCADE
+        )
+    """)
+    
+    cursor.execute("""
+        CREATE TABLE time_series_features (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            track_id INTEGER NOT NULL,
+            timestamp REAL NOT NULL,
+            energy_value REAL,
+            brightness_value REAL,
+            spectral_rolloff REAL,
+            rms_energy REAL,
+            created_at REAL DEFAULT (datetime('now')),
+            FOREIGN KEY (track_id) REFERENCES tracks (id) ON DELETE CASCADE
+        )
+    """)
+    
+    cursor.execute("""
+        CREATE TABLE analysis_tasks (
+            id TEXT PRIMARY KEY,
+            status TEXT NOT NULL DEFAULT 'pending',
+            progress REAL DEFAULT 0,
+            message TEXT,
+            started_at REAL,
+            completed_at REAL,
+            error_message TEXT,
+            total_files INTEGER DEFAULT 0,
+            processed_files INTEGER DEFAULT 0
+        )
+    """)
+    
+    connection.commit()
+    connection.close()
+    
+    yield db_path
+    
+    # Cleanup - ensure all connections are closed first
+    try:
+        # Small delay to allow connection cleanup
+        import time
+        time.sleep(0.1)
+        os.unlink(db_path)
+    except PermissionError:
+        # On Windows, sometimes file handles are still open
+        # Try again after a short delay
+        time.sleep(0.5)
+        try:
+            os.unlink(db_path)
+        except PermissionError:
+            # If still failing, log warning but don't fail test
+            import logging
+            logging.warning(f"Could not cleanup test database file: {db_path}")
 
 
 @pytest.fixture

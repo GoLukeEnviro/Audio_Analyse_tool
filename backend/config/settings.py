@@ -44,6 +44,7 @@ class Settings:
             
             # Music library settings
             "music_library": {
+                "scan_path": str(Path.home() / "Music"), # Default scan path
                 "default_paths": [
                     str(Path.home() / "Music"),
                     str(Path.home() / "Documents" / "My Music"),
@@ -69,7 +70,7 @@ class Settings:
             "audio_analysis": {
                 "cache_dir": str(CACHE_DIR),
                 "enable_multiprocessing": True,
-                "max_workers": min(os.cpu_count(), 8),
+                "max_workers": min(os.cpu_count() or 1, 8), # Absicherung für os.cpu_count()
                 "supported_formats": [
                     ".mp3", ".wav", ".flac", ".aac", ".ogg", ".m4a", 
                     ".aiff", ".aif", ".au", ".wma", ".mp4", ".3gp", ".amr", 
@@ -260,26 +261,29 @@ def apply_env_overrides():
     # Server overrides
     if os.getenv("HOST"):
         settings.set("server.host", os.getenv("HOST"))
-    if os.getenv("PORT"):
-        settings.set("server.port", int(os.getenv("PORT")))
-    if os.getenv("DEBUG"):
-        debug_mode = os.getenv("DEBUG").lower() in ("true", "1", "yes")
+    
+    port_env = os.getenv("PORT")
+    if port_env:
+        try:
+            settings.set("server.port", int(port_env))
+        except ValueError:
+            print(f"Warning: Invalid PORT environment variable: {port_env}. Using default.")
+    
+    debug_env = os.getenv("DEBUG")
+    if debug_env:
+        debug_mode = debug_env.lower() in ("true", "1", "yes")
         settings.set("development.debug", debug_mode)
         settings.set("server.reload", debug_mode)
     
     # Paths overrides
+    if os.getenv("MUSIC_LIBRARY_PATH"):
+        settings.set("music_library.scan_path", os.getenv("MUSIC_LIBRARY_PATH"))
     if os.getenv("CACHE_DIR"):
         settings.set("audio_analysis.cache_dir", os.getenv("CACHE_DIR"))
     if os.getenv("PRESETS_DIR"):
         settings.set("playlist_engine.presets_dir", os.getenv("PRESETS_DIR"))
     if os.getenv("EXPORT_DIR"):
         settings.set("export.output_dir", os.getenv("EXPORT_DIR"))
-    
-    # Performance overrides
-    if os.getenv("MAX_WORKERS"):
-        settings.set("audio_analysis.max_workers", int(os.getenv("MAX_WORKERS")))
-    if os.getenv("REQUEST_TIMEOUT"):
-        settings.set("performance.request_timeout_seconds", int(os.getenv("REQUEST_TIMEOUT")))
 
 
 # Apply environment overrides
@@ -297,11 +301,11 @@ def validate_config():
         errors.append(f"Invalid server port: {port}")
     
     # Validate directories
-    for path_key in ["audio_analysis.cache_dir", "playlist_engine.presets_dir", "export.output_dir"]:
+    for path_key in ["music_library.scan_path", "audio_analysis.cache_dir", "playlist_engine.presets_dir", "export.output_dir"]:
         path_value = settings.get(path_key)
-        if path_value and not Path(path_value).parent.exists():
+        if path_value and not Path(path_value).exists(): # Check if the directory itself exists
             try:
-                Path(path_value).parent.mkdir(parents=True, exist_ok=True)
+                Path(path_value).mkdir(parents=True, exist_ok=True) # Create the directory if it doesn't exist
             except Exception as e:
                 errors.append(f"Cannot create directory for {path_key}: {e}")
     

@@ -13,33 +13,32 @@ import asyncio
 import librosa
 import numpy as np
 from mutagen import File as MutagenFile
-from .cache_manager import CacheManager
+from backend.core_engine.data_management.database_manager import DatabaseManager
+from backend.core_engine.audio_analysis.feature_extractor import FeatureExtractor
+from backend.core_engine.mood_classifier.mood_classifier import MoodClassifier # Neuer Import
 
 logger = logging.getLogger(__name__)
-
-# Optionales Essentia-Import
-try:
-    import essentia
-    import essentia.standard as es
-    ESSENTIA_AVAILABLE = True
-except ImportError:
-    ESSENTIA_AVAILABLE = False
-    logger.warning("Essentia nicht verfügbar - verwende nur librosa")
 
 
 class AudioAnalyzer:
     """Erweiterte Audio-Analyse-Engine mit Essentia + librosa für headless Backend"""
     
-    def __init__(self, cache_dir: str = "data/cache", enable_multiprocessing: bool = True):
-        self.cache_dir = Path(cache_dir)
-        self.cache_dir.mkdir(parents=True, exist_ok=True)
+    def __init__(self, db_path: str = "data/database.db", enable_multiprocessing: bool = True):
+        self.db_path = Path(db_path)
+        self.db_path.parent.mkdir(parents=True, exist_ok=True)
         
-        # Cache Manager
-        self.cache_manager = CacheManager(str(self.cache_dir))
+        # Database Manager (replaces CacheManager)
+        self.database_manager = DatabaseManager(str(self.db_path))
+        
+        # Feature Extractor
+        self.feature_extractor = FeatureExtractor(use_essentia=True) # Essentia standardmäßig aktivieren
+        
+        # Mood Classifier
+        self.mood_classifier = MoodClassifier() # Instanziierung des MoodClassifiers
         
         # Multiprocessing-Konfiguration
         self.enable_multiprocessing = enable_multiprocessing
-        self.max_workers = min(mp.cpu_count(), 8)
+        self.max_workers = min(mp.cpu_count() or 1, 8)
         
         # Erweiterte unterstützte Audioformate
         self.supported_formats = {
@@ -56,9 +55,6 @@ class AudioAnalyzer:
             'trim_silence': True
         }
         
-        # Essentia-Algorithmen initialisieren
-        self._init_essentia_algorithms()
-        
         # Analyse-Statistiken
         self.analysis_stats = {
             'total_analyzed': 0,
@@ -66,119 +62,24 @@ class AudioAnalyzer:
             'errors': 0,
             'processing_time': 0.0
         }
-        
-        # Camelot Wheel mapping
-        self.camelot_wheel = {
-            'C': '8B', 'G': '9B', 'D': '10B', 'A': '11B', 'E': '12B', 'B': '1B',
-            'F#': '2B', 'C#': '3B', 'G#': '4B', 'D#': '5B', 'A#': '6B', 'F': '7B',
-            'Am': '8A', 'Em': '9A', 'Bm': '10A', 'F#m': '11A', 'C#m': '12A', 'G#m': '1A',
-            'D#m': '2A', 'A#m': '3A', 'Fm': '4A', 'Cm': '5A', 'Gm': '6A', 'Dm': '7A'
-        }
-    
-    def _init_essentia_algorithms(self):
-        """Initialisiert Essentia-Algorithmen"""
-        if not ESSENTIA_AVAILABLE:
-            logger.info("Essentia nicht verfügbar - verwende nur librosa")
-            self.use_essentia = False
-            return
-            
-        try:
-            # Rhythm-Algorithmen
-            self.rhythm_extractor = es.RhythmExtractor2013(method="multifeature")
-            self.onset_rate = es.OnsetRate()
-            
-            # Tonal-Algorithmen
-            self.key_extractor = es.KeyExtractor()
-            self.hpcp = es.HPCP()
-            self.spectral_peaks = es.SpectralPeaks()
-            
-            # Spectral-Algorithmen
-            self.spectral_centroid = es.SpectralCentroid()
-            self.spectral_rolloff = es.SpectralRollOff()
-            self.spectral_flux = es.SpectralFlux()
-            self.mfcc = es.MFCC(numberCoefficients=13)
-            
-            # Loudness-Algorithmen
-            self.loudness_ebu128 = es.LoudnessEBUR128()
-            self.dynamic_complexity = es.DynamicComplexity()
-            
-            # High-Level-Algorithmen
-            self.danceability = es.Danceability()
-            
-            logger.info("Essentia-Algorithmen erfolgreich initialisiert")
-            self.use_essentia = True
-            
-        except Exception as e:
-            logger.error(f"Fehler bei Essentia-Initialisierung: {e}")
-            self.use_essentia = False
-    
-    def get_cache_path(self, file_path: str) -> Path:
-        """Gibt Cache-Pfad für Datei zurück"""
-        file_hash = hashlib.md5(file_path.encode()).hexdigest()
-        return self.cache_dir / f"{file_hash}.json"
     
     def load_cached_analysis(self, file_path: str) -> Optional[Dict]:
-        """Lädt gecachte Analyse-Ergebnisse"""
-        cached = self.cache_manager.load_from_cache(file_path)
+        """Lädt Analyse-Ergebnisse aus der Datenbank"""
+        cached = self.database_manager.load_from_cache(file_path)
         if cached:
             self.analysis_stats['cache_hits'] += 1
             return cached
         return None
     
-    def save_analysis_cache(self, file_path: str, analysis: Dict):
-        """Speichert Analyse-Ergebnisse im Cache"""
-        success = self.cache_manager.save_to_cache(file_path, analysis)
+    def save_analysis_results(self, file_path: str, analysis: Dict):
+        """Speichert Analyse-Ergebnisse in der Datenbank"""
+        success = self.database_manager.save_to_cache(file_path, analysis)
         if not success:
-            logger.warning(f"Cache konnte nicht gespeichert werden für: {file_path}")
+            logger.warning(f"Analyse-Ergebnisse konnten nicht gespeichert werden für: {file_path}")
     
     def is_cached(self, file_path: str) -> bool:
-        """Prüft ob eine Datei bereits analysiert und gecacht ist"""
-        return self.cache_manager.is_cached(file_path)
-    
-    def estimate_key(self, y: np.ndarray, sr: int) -> Tuple[str, str]:
-        """Schätzt Tonart mit Krumhansl-Schmuckler Algorithmus"""
-        chroma = librosa.feature.chroma_stft(y=y, sr=sr)
-        chroma_mean = np.mean(chroma, axis=1)
-        
-        # Key templates (Krumhansl-Schmuckler)
-        major_template = np.array([6.35, 2.23, 3.48, 2.33, 4.38, 4.09, 2.52, 5.19, 2.39, 3.66, 2.29, 2.88])
-        minor_template = np.array([6.33, 2.68, 3.52, 5.38, 2.60, 3.53, 2.54, 4.75, 3.98, 2.69, 3.34, 3.17])
-        
-        key_names = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B']
-        
-        major_correlations = []
-        minor_correlations = []
-        
-        for i in range(12):
-            major_shifted = np.roll(major_template, i)
-            minor_shifted = np.roll(minor_template, i)
-            
-            major_corr = np.corrcoef(chroma_mean, major_shifted)[0, 1]
-            minor_corr = np.corrcoef(chroma_mean, minor_shifted)[0, 1]
-            
-            major_correlations.append(major_corr)
-            minor_correlations.append(minor_corr)
-        
-        max_major_idx = np.argmax(major_correlations)
-        max_minor_idx = np.argmax(minor_correlations)
-        
-        if major_correlations[max_major_idx] > minor_correlations[max_minor_idx]:
-            key = key_names[max_major_idx]
-        else:
-            key = key_names[max_minor_idx] + 'm'
-        
-        camelot = self.camelot_wheel.get(key, 'Unknown')
-        return key, camelot
-    
-    def estimate_energy(self, y: np.ndarray) -> float:
-        """Schätzt Energie des Tracks"""
-        rms = librosa.feature.rms(y=y)
-        return float(np.mean(rms))
-    
-    def estimate_brightness(self, y: np.ndarray, sr: int) -> float:
-        """Schätzt Helligkeit/Spektrum des Tracks"""
-        spectral_centroids = librosa.feature.spectral_centroid(y=y, sr=sr)
-        return float(np.mean(spectral_centroids))
+        """Prüft ob eine Datei bereits analysiert ist"""
+        return self.database_manager.is_cached(file_path)
     
     def validate_audio_file(self, file_path: str) -> bool:
         """Validiert Audio-Datei vor der Analyse"""
@@ -211,186 +112,6 @@ class AudioAnalyzer:
             logger.error(f"Fehler bei Datei-Validierung: {e}")
             return False
     
-    def _extract_librosa_features(self, y: np.ndarray, sr: int) -> Dict[str, float]:
-        """Extrahiert Audio-Features mit librosa"""
-        features = {}
-        
-        try:
-            # BPM und Beat-Tracking
-            tempo, beats = librosa.beat.beat_track(y=y, sr=sr)
-            features['bpm'] = float(tempo)
-            features['beat_count'] = len(beats)
-            
-            # Spectral Features
-            spectral_centroids = librosa.feature.spectral_centroid(y=y, sr=sr)[0]
-            features['spectral_centroid'] = float(np.mean(spectral_centroids))
-            
-            spectral_rolloff = librosa.feature.spectral_rolloff(y=y, sr=sr)[0]
-            features['spectral_rolloff'] = float(np.mean(spectral_rolloff))
-            
-            # Zero Crossing Rate
-            zcr = librosa.feature.zero_crossing_rate(y)[0]
-            features['zero_crossing_rate'] = float(np.mean(zcr))
-            
-            # MFCC Features
-            mfccs = librosa.feature.mfcc(y=y, sr=sr, n_mfcc=13)
-            features['mfcc_variance'] = float(np.var(mfccs))
-            
-            # Chroma Features für Harmonie
-            chroma = librosa.feature.chroma_stft(y=y, sr=sr)
-            features['chroma_mean'] = float(np.mean(chroma))
-            
-            # RMS Energy
-            rms = librosa.feature.rms(y=y)[0]
-            features['energy'] = float(np.mean(rms))
-            
-            # Loudness (approximiert)
-            features['loudness'] = float(librosa.amplitude_to_db(np.mean(rms)))
-            
-            # Tonart-Features
-            chroma_mean = np.mean(chroma, axis=1)
-            key_index = np.argmax(chroma_mean)
-            features['key_numeric'] = key_index
-            features['key_confidence'] = float(chroma_mean[key_index])
-            
-            # Mode (Dur/Moll) - vereinfachte Heuristik
-            major_profile = np.array([1, 0, 1, 0, 1, 1, 0, 1, 0, 1, 0, 1])
-            minor_profile = np.array([1, 0, 1, 1, 0, 1, 0, 1, 1, 0, 1, 0])
-            
-            major_corr = np.corrcoef(chroma_mean, major_profile)[0, 1]
-            minor_corr = np.corrcoef(chroma_mean, minor_profile)[0, 1]
-            
-            features['mode'] = 'major' if major_corr > minor_corr else 'minor'
-            
-            # Valence (vereinfacht)
-            features['valence'] = float((major_corr + features['energy']) / 2)
-            
-            # Danceability (Heuristik)
-            beat_strength = len(beats) / (len(y) / sr) / 4.0
-            features['danceability'] = min(1.0, beat_strength * features['energy'])
-            
-        except Exception as e:
-            logger.error(f"Fehler bei librosa Feature-Extraktion: {e}")
-        
-        return features
-    
-    def _extract_essentia_features(self, y: np.ndarray, sr: int) -> Dict[str, float]:
-        """Extrahiert erweiterte Audio-Features mit Essentia"""
-        features = {}
-        
-        if not self.use_essentia:
-            return features
-        
-        try:
-            # Convert to Essentia format
-            audio_mono = essentia.array(y)
-            
-            # Rhythm Features
-            bpm, beats, beat_confidence, _, estimates = self.rhythm_extractor(audio_mono)
-            features['essentia_bpm'] = float(bpm)
-            features['beat_confidence'] = float(beat_confidence)
-            
-            # Onset Rate
-            onset_rate = self.onset_rate(audio_mono)
-            features['onset_rate'] = float(onset_rate)
-            
-            # Key Detection
-            key, scale, strength = self.key_extractor(audio_mono)
-            features['key_essentia'] = key
-            features['scale_essentia'] = scale
-            features['key_strength'] = float(strength)
-            
-            # Spectral Analysis
-            windowing = essentia.standard.Windowing(type='hann')
-            fft = essentia.standard.FFT()
-            spectrum = essentia.standard.Spectrum()
-            
-            # Process frames for spectral analysis
-            frame_size = 2048
-            hop_size = 1024
-            frames = []
-            
-            for i in range(0, len(audio_mono) - frame_size, hop_size):
-                frame = audio_mono[i:i+frame_size]
-                windowed_frame = windowing(essentia.array(frame))
-                fft_frame = fft(windowed_frame)
-                spectrum_frame = spectrum(fft_frame)
-                frames.append(spectrum_frame)
-            
-            if len(frames) > 0:
-                # Spectral features
-                avg_spectrum = np.mean(frames, axis=0)
-                features['spectral_centroid_essentia'] = float(self.spectral_centroid(avg_spectrum))
-                features['spectral_rolloff_essentia'] = float(self.spectral_rolloff(avg_spectrum))
-                
-                # MFCC (Essentia version)
-                bands, mfcc_coeffs = self.mfcc(avg_spectrum)
-                features['mfcc_essentia_mean'] = float(np.mean(mfcc_coeffs))
-            
-            # Loudness (professional EBU R128)
-            try:
-                loudness = self.loudness_ebu128(audio_mono)
-                features['loudness_ebu128'] = float(loudness)
-            except:
-                pass
-            
-            # Dynamic Complexity
-            try:
-                dynamic_complexity = self.dynamic_complexity(audio_mono)
-                features['dynamic_complexity'] = float(dynamic_complexity)
-            except:
-                pass
-                
-            # Danceability (Essentia version)
-            try:
-                danceability, dfa = self.danceability(audio_mono)
-                features['danceability_essentia'] = float(danceability)
-                features['dfa'] = float(dfa)
-            except:
-                pass
-            
-        except Exception as e:
-            logger.error(f"Fehler bei Essentia Feature-Extraktion: {e}")
-        
-        return features
-
-    def _extract_fass_features(self, y: np.ndarray, sr: int) -> Dict[str, float]:
-        """Extrahiert FASS-spezifische Audio-Features"""
-        features = {}
-        # TODO: Implement FASS feature extraction logic here
-        return features
-    
-    def _extract_metadata(self, file_path: str) -> Dict[str, Any]:
-        """Extrahiert Metadaten aus Audio-Datei"""
-        metadata = {}
-        
-        try:
-            # Mutagen für ID3-Tags
-            audio_file = MutagenFile(file_path)
-            if audio_file is not None:
-                metadata.update({
-                    'title': str(audio_file.get('TIT2', [''])[0]) if audio_file.get('TIT2') else os.path.splitext(os.path.basename(file_path))[0],
-                    'artist': str(audio_file.get('TPE1', [''])[0]) if audio_file.get('TPE1') else 'Unknown',
-                    'album': str(audio_file.get('TALB', [''])[0]) if audio_file.get('TALB') else 'Unknown',
-                    'genre': str(audio_file.get('TCON', [''])[0]) if audio_file.get('TCON') else 'Unknown',
-                    'year': str(audio_file.get('TDRC', [''])[0]) if audio_file.get('TDRC') else None,
-                })
-            
-            # Datei-Informationen
-            file_stats = os.stat(file_path)
-            metadata.update({
-                'file_size': file_stats.st_size,
-                'file_path': file_path,
-                'filename': os.path.basename(file_path),
-                'extension': Path(file_path).suffix.lower(),
-                'analyzed_at': file_stats.st_mtime
-            })
-            
-        except Exception as e:
-            logger.error(f"Fehler bei Metadaten-Extraktion: {e}")
-        
-        return metadata
-    
     def analyze_track(self, file_path: str) -> Dict[str, Any]:
         """Analysiert einen Audio-Track komplett"""
         # Check cache first
@@ -404,6 +125,7 @@ class AudioAnalyzer:
             'features': {},
             'metadata': {},
             'camelot': {},
+            'mood': {}, # Hinzugefügt für Mood-Analyse
             'errors': [],
             'status': 'analyzing',
             'version': '2.0'
@@ -432,41 +154,40 @@ class AudioAnalyzer:
                 y = librosa.util.normalize(y)
             
             # Features extrahieren
-            librosa_features = self._extract_librosa_features(y, sr)
-            result['features'].update(librosa_features)
+            all_features = self.feature_extractor.extract_all_features(y, sr)
+            result['features'].update(all_features)
             
-            # Erweiterte Essentia-Features (falls verfügbar)
-            if self.use_essentia:
-                essentia_features = self._extract_essentia_features(y, sr)
-                result['features'].update(essentia_features)
-                
-                # Use better Essentia BPM if available
-                if 'essentia_bpm' in essentia_features and essentia_features.get('beat_confidence', 0) > 0.5:
-                    result['features']['bpm'] = essentia_features['essentia_bpm']
+            # NEUE Phase 2 Funktionalität: Zeitreihen-Features extrahieren
+            time_series_features = self._extract_time_series_features(y, sr)
+            result['time_series_features'] = time_series_features
             
             # Metadaten extrahieren
-            metadata = self._extract_metadata(file_path)
+            metadata = self.feature_extractor.extract_metadata(file_path)
             metadata['duration'] = len(y) / sr
             result['metadata'] = metadata
             
-            # Fassaden-Analyse (FASS)
-            fass_features = self._extract_fass_features(y, sr)
-            result['features'].update(fass_features)
-
             # Camelot Wheel Info
-            key, camelot = self.estimate_key(y, sr)
+            key, camelot = self.feature_extractor.estimate_key(y, sr)
             result['camelot'] = {
                 'key': key,
                 'camelot': camelot,
                 'key_confidence': result['features'].get('key_confidence', 0.0),
-                'compatible_keys': self._get_compatible_keys(camelot)
+                'compatible_keys': self.feature_extractor.get_compatible_keys(camelot)
+            }
+            
+            # Mood-Klassifikation
+            mood, confidence, scores = self.mood_classifier.classify_mood(result['features'])
+            result['mood'] = {
+                'primary_mood': mood,
+                'confidence': confidence,
+                'scores': scores
             }
             
             result['status'] = 'completed'
             self.analysis_stats['total_analyzed'] += 1
             
-            # Cache speichern
-            self.save_analysis_cache(file_path, result)
+            # Ergebnisse in Datenbank speichern
+            self.save_analysis_results(file_path, result)
             
         except Exception as e:
             error_msg = f"Fehler bei der Analyse von {file_path}: {str(e)}"
@@ -476,33 +197,6 @@ class AudioAnalyzer:
             self.analysis_stats['errors'] += 1
         
         return result
-    
-    def _get_compatible_keys(self, camelot: str) -> List[str]:
-        """Gibt harmonisch kompatible Keys zurück"""
-        if not camelot or len(camelot) < 2:
-            return []
-        
-        try:
-            number = int(camelot[:-1])
-            letter = camelot[-1]
-        except (ValueError, IndexError):
-            return []
-        
-        compatible = []
-        
-        # Gleiche Nummer, andere Modalität (relative Dur/Moll)
-        if letter == 'A':
-            compatible.append(f"{number}B")
-        else:
-            compatible.append(f"{number}A")
-        
-        # +1 und -1 (Quintenzirkel)
-        next_num = (number % 12) + 1
-        prev_num = ((number - 2) % 12) + 1
-        
-        compatible.extend([f"{next_num}{letter}", f"{prev_num}{letter}"])
-        
-        return compatible
     
     async def analyze_batch_async(self, file_paths: List[str], 
                                  progress_callback: Optional[Callable] = None) -> Dict[str, Dict]:
@@ -553,21 +247,100 @@ class AudioAnalyzer:
         
         return results
     
+    def _extract_time_series_features(self, y: np.ndarray, sr: int, 
+                                     window_seconds: float = 5.0) -> List[Dict[str, Any]]:
+        """
+        Extrahiert zeitbasierte Features für grafische Darstellung
+        Analysiert alle window_seconds Sekunden Energie, Helligkeit, etc.
+        
+        Args:
+            y: Audio-Signal
+            sr: Sample-Rate
+            window_seconds: Zeitfenster in Sekunden (Standard: 5 Sekunden)
+        
+        Returns:
+            Liste von Zeitpunkten mit entsprechenden Feature-Werten
+        """
+        duration = len(y) / sr
+        window_samples = int(window_seconds * sr)
+        hop_samples = window_samples  # Non-overlapping windows
+        
+        time_series_data = []
+        
+        try:
+            # Iteriere über das Audio-Signal in Zeitfenstern
+            for start_sample in range(0, len(y), hop_samples):
+                end_sample = min(start_sample + window_samples, len(y))
+                
+                if end_sample - start_sample < window_samples // 2:
+                    # Skip zu kurze Segmente am Ende
+                    break
+                
+                # Zeitstempel für dieses Segment
+                timestamp = start_sample / sr
+                
+                # Audio-Segment extrahieren
+                segment = y[start_sample:end_sample]
+                
+                if len(segment) == 0:
+                    continue
+                
+                # Features für dieses Zeitfenster berechnen
+                time_point_features = {}
+                
+                # 1. Energie (RMS)
+                rms = librosa.feature.rms(y=segment)[0]
+                time_point_features['energy_value'] = float(np.mean(rms))
+                time_point_features['rms_energy'] = float(np.mean(rms))
+                
+                # 2. Spektrale Helligkeit (Centroid)
+                spectral_centroid = librosa.feature.spectral_centroid(y=segment, sr=sr)[0]
+                time_point_features['brightness_value'] = float(np.mean(spectral_centroid))
+                
+                # 3. Spektrale Rolloff (zusätzliche Information für Klangfarbe)
+                spectral_rolloff = librosa.feature.spectral_rolloff(y=segment, sr=sr)[0]
+                time_point_features['spectral_rolloff'] = float(np.mean(spectral_rolloff))
+                
+                # 4. Zeitstempel
+                time_point_features['timestamp'] = timestamp
+                
+                # Optional: Weitere Features für erweiterte Analyse
+                try:
+                    # Zero Crossing Rate (Indikator für Percussion vs. Tonal)
+                    zcr = librosa.feature.zero_crossing_rate(segment)[0]
+                    time_point_features['zero_crossing_rate'] = float(np.mean(zcr))
+                    
+                    # Spectral Bandwidth (Klangbreite)
+                    spectral_bandwidth = librosa.feature.spectral_bandwidth(y=segment, sr=sr)[0]
+                    time_point_features['spectral_bandwidth'] = float(np.mean(spectral_bandwidth))
+                    
+                except Exception as e:
+                    logger.debug(f"Could not extract additional time series features: {e}")
+                
+                time_series_data.append(time_point_features)
+            
+            logger.debug(f"Extracted {len(time_series_data)} time series data points")
+            return time_series_data
+            
+        except Exception as e:
+            logger.error(f"Error extracting time series features: {e}")
+            return []
+    
     def get_analysis_stats(self) -> Dict[str, Any]:
         """Gibt Analyse-Statistiken zurück"""
         return self.analysis_stats.copy()
     
     def clear_cache(self) -> int:
-        """Leert den Analyse-Cache"""
-        return self.cache_manager.clear_cache()
+        """Leert die Analyse-Datenbank"""
+        return self.database_manager.clear_cache()
     
     def get_cache_stats(self) -> Dict[str, Any]:
-        """Gibt Cache-Statistiken zurück"""
-        return self.cache_manager.get_cache_stats()
+        """Gibt Datenbank-Statistiken zurück"""
+        return self.database_manager.get_cache_stats()
     
     def cleanup_cache(self, max_age_days: int = 30, max_size_mb: int = 1000) -> Dict[str, Any]:
-        """Bereinigt den Cache"""
-        return self.cache_manager.cleanup_cache(max_age_days, max_size_mb)
+        """Bereinigt die Datenbank"""
+        return self.database_manager.cleanup_cache(max_age_days, max_size_mb)
     
     def get_supported_formats(self) -> List[str]:
         """Gibt unterstützte Audio-Formate zurück"""

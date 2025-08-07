@@ -5,12 +5,20 @@ import logging
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple, Any
 import numpy as np
+import os
+
+# Optionaler LightGBM-Import
+try:
+    import lightgbm as lgb
+    LIGHTGBM_AVAILABLE = True
+except ImportError:
+    LIGHTGBM_AVAILABLE = False
 
 logger = logging.getLogger(__name__)
 
 
 class MoodClassifier:
-    """Vereinfachter Mood Classifier für headless Backend mit Heuristik-basierten Regeln"""
+    """Hybrid-Mood-Classifier für headless Backend mit Heuristik- und optional ML-basierten Regeln"""
     
     MOOD_CATEGORIES = [
         "euphoric",     # Hochenergetisch, positiv
@@ -24,15 +32,19 @@ class MoodClassifier:
         "neutral"       # Neutral/unbekannt
     ]
     
-    def __init__(self, config_path: Optional[str] = None):
+    def __init__(self, config_path: Optional[str] = None, model_path: Optional[str] = None):
         self.config_path = Path(config_path) if config_path else Path("data/mood_config.json")
+        self.model_path = Path(model_path) if model_path else Path("data/models/mood_model.txt")
         self.config = self._load_config()
         self.mood_rules = self._create_mood_rules()
+        self.ml_model = self._load_ml_model() if self.config.get("enable_ml_classifier", False) else None
         
     def _load_config(self) -> Dict[str, Any]:
         """Lädt Konfiguration für Mood-Klassifikation"""
         default_config = {
             "confidence_threshold": 0.5,
+            "enable_ml_classifier": False, # Standardmäßig deaktiviert
+            "fallback_to_heuristic": True,
             "feature_weights": {
                 "energy": 1.0,
                 "valence": 1.0,
@@ -106,31 +118,98 @@ class MoodClassifier:
         
         return rules
     
+    def _load_ml_model(self):
+        """Lädt das trainierte LightGBM-Modell"""
+        if not LIGHTGBM_AVAILABLE:
+            logger.warning("LightGBM nicht verfügbar, ML-Klassifikator kann nicht geladen werden.")
+            return None
+        
+        if self.model_path.exists():
+            try:
+                model = lgb.Booster(model_file=str(self.model_path))
+                logger.info(f"LightGBM-Modell erfolgreich geladen von {self.model_path}")
+                return model
+            except Exception as e:
+                logger.error(f"Fehler beim Laden des LightGBM-Modells: {e}")
+                return None
+        else:
+            logger.warning(f"Kein LightGBM-Modell gefunden unter {self.model_path}")
+            return None
+    
+    def _prepare_ml_features(self, features: Dict[str, float]) -> np.ndarray:
+        """Bereitet Features für das ML-Modell vor"""
+        # Dies muss den Features entsprechen, die das Modell beim Training gesehen hat
+        # Beispiel-Reihenfolge der Features: energy, valence, danceability, bpm, loudness, spectral_centroid, key_numeric
+        
+        feature_order = [
+            "energy", "valence", "danceability", "bpm", "loudness", "spectral_centroid", "key_numeric"
+        ]
+        
+        # Sicherstellen, dass alle erwarteten Features vorhanden sind
+        ml_features = []
+        for feature_name in feature_order:
+            val = features.get(feature_name)
+            if feature_name == "mode": # Modus als numerischen Wert behandeln
+                ml_features.append(1.0 if val == 'major' else 0.0)
+            elif feature_name == "key_numeric": # Key_numeric direkt verwenden
+                ml_features.append(val if val is not None else 0.0)
+            else:
+                ml_features.append(val if val is not None else 0.5) # Standardwert für fehlende numerische Features
+        
+        return np.array([ml_features])
+    
     def classify_mood(self, features: Dict[str, Any]) -> Tuple[str, float, Dict[str, float]]:
         """Klassifiziert Stimmung basierend auf Audio-Features"""
         try:
             # Normalisiere Features
             normalized_features = self._normalize_features(features)
             
-            # Berechne Scores für alle Stimmungen
-            mood_scores = {}
+            # Versuche ML-Klassifikation zuerst
+            if self.ml_model and self.config.get("enable_ml_classifier", False):
+                try:
+                    ml_features = self._prepare_ml_features(normalized_features)
+                    # Vorhersage der Wahrscheinlichkeiten für jede Mood-Kategorie
+                    predictions = self.ml_model.predict(ml_features)[0]
+                    
+                    # Konvertiere Vorhersagen in ein Mood-Score-Dict
+                    mood_scores_ml = {
+                        self.MOOD_CATEGORIES[i]: float(predictions[i]) 
+                        for i in range(len(self.MOOD_CATEGORIES) - 1) # Ohne 'neutral'
+                    }
+                    
+                    # Finde die beste Stimmung und Konfidenz
+                    # Korrektur: max() mit default Wert, um None-Fehler zu vermeiden
+                    best_mood_ml = max(mood_scores_ml, key=lambda k: mood_scores_ml.get(k, 0.0))
+                    confidence_ml = mood_scores_ml[best_mood_ml]
+                    
+                    if confidence_ml >= self.config["confidence_threshold"]:
+                        logger.debug(f"ML-Klassifikation: {best_mood_ml} mit Konfidenz {confidence_ml:.2f}")
+                        mood_scores_ml["neutral"] = 1.0 - confidence_ml
+                        return best_mood_ml, confidence_ml, mood_scores_ml
+                    else:
+                        logger.debug(f"ML-Konfidenz zu niedrig ({confidence_ml:.2f}), falle zurück auf Heuristik.")
+                except Exception as e:
+                    logger.warning(f"Fehler bei ML-Klassifikation, falle zurück auf Heuristik: {e}")
             
-            for mood in self.MOOD_CATEGORIES[:-1]:  # Ohne 'neutral'
-                score = self._calculate_mood_score(mood, normalized_features)
-                mood_scores[mood] = score
+            # Fallback auf heuristische Klassifikation
+            if self.config.get("fallback_to_heuristic", True):
+                mood_scores_heuristic = {}
+                for mood in self.MOOD_CATEGORIES[:-1]:  # Ohne 'neutral'
+                    score = self._calculate_mood_score(mood, normalized_features)
+                    mood_scores_heuristic[mood] = score
+                
+                if not mood_scores_heuristic or max(mood_scores_heuristic.values()) < self.config["confidence_threshold"]:
+                    best_mood_heuristic = "neutral"
+                    confidence_heuristic = 0.0
+                else:
+                    # Korrektur: max() mit default Wert, um None-Fehler zu vermeiden
+                    best_mood_heuristic = max(mood_scores_heuristic, key=lambda k: mood_scores_heuristic.get(k, 0.0))
+                    confidence_heuristic = mood_scores_heuristic[best_mood_heuristic]
+                
+                mood_scores_heuristic["neutral"] = 1.0 - confidence_heuristic
+                return best_mood_heuristic, confidence_heuristic, mood_scores_heuristic
             
-            # Beste Stimmung ermitteln
-            if not mood_scores or max(mood_scores.values()) < self.config["confidence_threshold"]:
-                best_mood = "neutral"
-                confidence = 0.0
-            else:
-                best_mood = max(mood_scores, key=mood_scores.get)
-                confidence = mood_scores[best_mood]
-            
-            # Füge neutral zur Ausgabe hinzu
-            mood_scores["neutral"] = 1.0 - max(mood_scores.values()) if mood_scores else 1.0
-            
-            return best_mood, confidence, mood_scores
+            return "neutral", 0.0, {mood: 0.0 for mood in self.MOOD_CATEGORIES}
             
         except Exception as e:
             logger.error(f"Fehler bei Mood-Klassifikation: {e}")
@@ -177,6 +256,9 @@ class MoodClassifier:
             normalized['mode'] = 'major' if mode > 0.5 else 'minor'
         else:
             normalized['mode'] = 'major'
+        
+        # Key_numeric direkt verwenden, falls vorhanden
+        normalized['key_numeric'] = float(features.get('key_numeric', 0.0))
         
         return normalized
     
@@ -337,8 +419,8 @@ class MoodClassifier:
                 for mood, count in mood_distribution.items()
             },
             "average_confidence": np.mean(confidence_scores) if confidence_scores else 0.0,
-            "confidence_std": np.std(confidence_scores) if confidence_scores else 0.0,
-            "dominant_mood": max(mood_distribution, key=mood_distribution.get) if total_tracks > 0 else "neutral"
+            # Korrektur: max() mit default Wert, um None-Fehler zu vermeiden
+            "dominant_mood": max(mood_distribution, key=lambda k: mood_distribution.get(k, 0)) if total_tracks > 0 else "neutral"
         }
     
     def update_config(self, new_config: Dict[str, Any]) -> bool:

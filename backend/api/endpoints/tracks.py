@@ -8,21 +8,21 @@ from pathlib import Path
 from fastapi import APIRouter, HTTPException, Query, Depends
 from fastapi.responses import JSONResponse
 
-from ..models import (
+from backend.api.models import (
     Track, TrackSummary, TracksListResponse, TrackDetailsResponse,
     TracksQueryParams, ErrorResponse, MoodCategory
 )
-from ...core_engine.audio_analysis.analyzer import AudioAnalyzer
-from ...core_engine.audio_analysis.cache_manager import CacheManager
-from ...core_engine.mood_classifier.mood_classifier import MoodClassifier
-from ...config.settings import settings
+from backend.core_engine.audio_analysis.analyzer import AudioAnalyzer
+from backend.core_engine.data_management.database_manager import DatabaseManager
+from backend.core_engine.mood_classifier.mood_classifier import MoodClassifier
+from backend.config.settings import settings
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
 
 # Global instances (initialized on first use)
 _analyzer = None
-_cache_manager = None
+_database_manager = None
 _mood_classifier = None
 
 
@@ -31,18 +31,18 @@ def get_analyzer():
     global _analyzer
     if _analyzer is None:
         _analyzer = AudioAnalyzer(
-            cache_dir=settings.get("audio_analysis.cache_dir"),
+            db_path=settings.get("audio_analysis.db_path", "data/database.db"),
             enable_multiprocessing=settings.get("audio_analysis.enable_multiprocessing", True)
         )
     return _analyzer
 
 
-def get_cache_manager():
-    """Get CacheManager instance"""
-    global _cache_manager
-    if _cache_manager is None:
-        _cache_manager = CacheManager(settings.get("audio_analysis.cache_dir"))
-    return _cache_manager
+def get_database_manager():
+    """Get DatabaseManager instance"""
+    global _database_manager
+    if _database_manager is None:
+        _database_manager = DatabaseManager(settings.get("audio_analysis.db_path", "data/database.db"))
+    return _database_manager
 
 
 def get_mood_classifier():
@@ -77,19 +77,61 @@ def parse_query_params(
     )
 
 
-def get_cached_tracks() -> List[dict]:
-    """Get all cached tracks"""
-    cache_manager = get_cache_manager()
-    cached_files = cache_manager.get_cached_files()
+def get_cached_tracks_with_filters(params: TracksQueryParams) -> List[dict]:
+    """Get all tracks from database"""
+    database_manager = get_database_manager()
     
+    # Build filters from query parameters
+    filters = {}
+    if params.artist:
+        filters['artist'] = params.artist
+    if params.genre:
+        filters['genre'] = params.genre
+    if params.min_bpm:
+        filters['min_bpm'] = params.min_bpm
+    if params.max_bpm:
+        filters['max_bpm'] = params.max_bpm
+    if params.min_energy:
+        filters['min_energy'] = params.min_energy
+    if params.max_energy:
+        filters['max_energy'] = params.max_energy
+    if params.mood:
+        filters['mood'] = params.mood.value
+    
+    # Calculate offset
+    offset = (params.page - 1) * params.per_page
+    
+    # Get tracks with filters - use database-level filtering for better performance
+    tracks_summary = database_manager.get_all_tracks(
+        limit=params.per_page + 1,  # +1 to check if there are more
+        offset=offset,
+        filters=filters if filters else None
+    )
+    
+    # Convert to full track format if needed
     tracks = []
-    for cached_file in cached_files:
-        try:
-            track_data = cache_manager.load_from_cache(cached_file['file_path'])
-            if track_data:
-                tracks.append(track_data)
-        except Exception as e:
-            logger.warning(f"Error loading cached track {cached_file['file_path']}: {e}")
+    for track_summary in tracks_summary:
+        # Load full track data if we need complete information
+        full_track = database_manager.load_from_cache(track_summary['file_path'])
+        if full_track:
+            tracks.append(full_track)
+    
+    return tracks
+
+
+def get_all_cached_tracks() -> List[dict]:
+    """Get all tracks from database without filtering"""
+    database_manager = get_database_manager()
+    
+    # Get all tracks (with a reasonable limit)
+    tracks_summary = database_manager.get_all_tracks(limit=10000, offset=0)
+    
+    # Convert to full track format
+    tracks = []
+    for track_summary in tracks_summary:
+        full_track = database_manager.load_from_cache(track_summary['file_path'])
+        if full_track:
+            tracks.append(full_track)
     
     return tracks
 
@@ -208,36 +250,17 @@ async def list_tracks(params: TracksQueryParams = Depends(parse_query_params)):
     - **search**: Volltext-Suche in Titel/Artist/Dateiname
     """
     try:
-        # Get all cached tracks
-        all_tracks = get_cached_tracks()
+        # Get tracks from database with filters applied
+        all_tracks = get_cached_tracks_with_filters(params)
         
-        if not all_tracks:
-            return TracksListResponse(
-                tracks=[],
-                total_count=0,
-                page=params.page,
-                per_page=params.per_page,
-                total_pages=0,
-                has_next=False,
-                has_prev=False
-            )
+        # Convert to summaries (filtering and pagination already done in get_cached_tracks)
+        track_summaries = [track_to_summary(track) for track in all_tracks]
         
-        # Filter tracks
-        filtered_tracks = filter_tracks(all_tracks, params)
-        
-        # Sort tracks
-        sorted_tracks = sort_tracks(filtered_tracks, params.sort_by, params.sort_order)
-        
-        # Pagination
-        total_count = len(sorted_tracks)
-        total_pages = (total_count + params.per_page - 1) // params.per_page
-        start_idx = (params.page - 1) * params.per_page
-        end_idx = start_idx + params.per_page
-        
-        paginated_tracks = sorted_tracks[start_idx:end_idx]
-        
-        # Convert to summaries
-        track_summaries = [track_to_summary(track) for track in paginated_tracks]
+        # Get database stats for total count
+        database_manager = get_database_manager()
+        db_stats = database_manager.get_cache_stats()
+        total_count = db_stats.get('analyzed_tracks', 0)
+        total_pages = (total_count + params.per_page - 1) // params.per_page if total_count > 0 else 1
         
         return TracksListResponse(
             tracks=track_summaries,
@@ -254,12 +277,120 @@ async def list_tracks(params: TracksQueryParams = Depends(parse_query_params)):
         raise HTTPException(status_code=500, detail="Failed to list tracks")
 
 
+@router.get("/{track_id:path}/time-series", summary="Get track time series data")
+async def get_track_time_series(track_id: str, 
+                               include_raw_data: bool = Query(False, description="Include raw time series data")):
+    """
+    NEUE Phase 2 Funktionalität: Zeitreihen-Features für grafische Darstellung
+    
+    Gibt die zeitbasierten Features eines Tracks zurück (Energie- und Helligkeit-Verlauf über die Zeit).
+    Diese Daten ermöglichen es Frontend-Anwendungen, Wellenform-ähnliche Visualisierungen zu erstellen.
+    
+    Args:
+        track_id: File path des Tracks (URL-encoded)
+        include_raw_data: Ob zusätzliche Raw-Daten zurückgegeben werden sollen
+    
+    Returns:
+        JSON mit Zeitreihen-Daten: timestamp, energy_value, brightness_value pro Datenpunkt
+    """
+    try:
+        # URL decode the track path
+        from urllib.parse import unquote
+        file_path = unquote(track_id)
+        
+        database_manager = get_database_manager()
+        
+        # Get track basic info
+        track_record = database_manager.get_track_by_path(file_path)
+        if not track_record:
+            raise HTTPException(status_code=404, detail="Track not found")
+        
+        # Get time series data
+        time_series_records = database_manager.get_time_series_data(track_record.id)
+        
+        if not time_series_records:
+            raise HTTPException(status_code=404, detail="No time series data available for this track")
+        
+        # Convert to API response format
+        time_series_data = []
+        for record in time_series_records:
+            data_point = {
+                "timestamp": record.timestamp,
+                "energy_value": record.energy_value,
+                "brightness_value": record.brightness_value
+            }
+            
+            # Include additional data if requested
+            if include_raw_data:
+                data_point.update({
+                    "spectral_rolloff": record.spectral_rolloff,
+                    "rms_energy": record.rms_energy,
+                    "created_at": record.created_at
+                })
+            
+            time_series_data.append(data_point)
+        
+        # Calculate some summary statistics
+        energy_values = [d["energy_value"] for d in time_series_data if d["energy_value"] is not None]
+        brightness_values = [d["brightness_value"] for d in time_series_data if d["brightness_value"] is not None]
+        
+        import numpy as np
+        energy_stats = {}
+        brightness_stats = {}
+        
+        if energy_values:
+            energy_stats = {
+                "min": float(np.min(energy_values)),
+                "max": float(np.max(energy_values)),
+                "mean": float(np.mean(energy_values)),
+                "std": float(np.std(energy_values))
+            }
+        
+        if brightness_values:
+            brightness_stats = {
+                "min": float(np.min(brightness_values)),
+                "max": float(np.max(brightness_values)),
+                "mean": float(np.mean(brightness_values)),
+                "std": float(np.std(brightness_values))
+            }
+        
+        return {
+            "file_path": file_path,
+            "filename": track_record.filename,
+            "title": track_record.title,
+            "artist": track_record.artist,
+            "duration": track_record.duration,
+            "time_series_data": time_series_data,
+            "data_points_count": len(time_series_data),
+            "window_seconds": 5.0,  # Default window size
+            "energy_statistics": energy_stats,
+            "brightness_statistics": brightness_stats,
+            "available_features": [
+                "energy_value", 
+                "brightness_value",
+                "spectral_rolloff" if include_raw_data else None,
+                "rms_energy" if include_raw_data else None
+            ]
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error getting time series data for track {track_id}: {e}")
+        raise HTTPException(status_code=500, detail="Failed to get time series data")
+
+
 @router.get("/{track_id:path}", response_model=TrackDetailsResponse, summary="Get track details")
-async def get_track_details(track_id: str):
+async def get_track_details(track_id: str, 
+                           include_time_series: bool = Query(False, description="Include time series data")):
     """
     Gibt detaillierte Informationen zu einem einzelnen Track zurück.
     
     Der track_id ist der file_path des Tracks (URL-encoded).
+    
+    Args:
+        track_id: File path des Tracks (URL-encoded)
+        include_time_series: Ob Zeitreihen-Daten mit zurückgegeben werden sollen
     """
     try:
         # Decode track_id (it's the file path)
@@ -270,8 +401,28 @@ async def get_track_details(track_id: str):
             raise HTTPException(status_code=404, detail="Track file not found")
         
         # Try to load from cache first
-        cache_manager = get_cache_manager()
-        track_data = cache_manager.load_from_cache(file_path)
+        database_manager = get_database_manager()
+        track_data = database_manager.load_from_cache(file_path)
+        
+        # Add time series data if requested
+        if include_time_series and track_data:
+            try:
+                track_record = database_manager.get_track_by_path(file_path)
+                if track_record:
+                    time_series_records = database_manager.get_time_series_data(track_record.id)
+                    if time_series_records:
+                        track_data['time_series_features'] = [
+                            {
+                                'timestamp': record.timestamp,
+                                'energy_value': record.energy_value,
+                                'brightness_value': record.brightness_value,
+                                'spectral_rolloff': record.spectral_rolloff,
+                                'rms_energy': record.rms_energy
+                            }
+                            for record in time_series_records
+                        ]
+            except Exception as e:
+                logger.warning(f"Could not load time series data: {e}")
         
         if not track_data:
             # If not cached, analyze the track
@@ -322,14 +473,14 @@ async def find_similar_tracks(
     """
     try:
         # Get reference track
-        cache_manager = get_cache_manager()
+        database_manager = get_database_manager()
         reference_track = cache_manager.load_from_cache(track_path)
         
         if not reference_track:
             raise HTTPException(status_code=404, detail="Reference track not found in cache")
         
         # Get all tracks
-        all_tracks = get_cached_tracks()
+        all_tracks = get_all_cached_tracks()
         similar_tracks = []
         
         ref_features = reference_track.get('features', {})
@@ -434,7 +585,7 @@ async def get_tracks_statistics():
     Gibt Überblick-Statistiken über alle analysierten Tracks zurück.
     """
     try:
-        all_tracks = get_cached_tracks()
+        all_tracks = get_all_cached_tracks()
         
         if not all_tracks:
             return {

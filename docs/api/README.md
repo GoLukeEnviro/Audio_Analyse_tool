@@ -1,690 +1,630 @@
-# API Reference - DJ Audio-Analyse-Tool Pro
+# FastAPI Backend Reference - DJ Audio-Analyse-Tool Pro
 
-Vollständige API-Dokumentation für Entwickler und erweiterte Benutzer.
+Vollständige REST API-Dokumentation für das headless Backend (Project Phoenix).
 
 ## 📚 Übersicht
 
-Die API des DJ Audio-Analyse-Tools ist modular aufgebaut und bietet Zugriff auf alle Kernfunktionen:
+Das Backend ist als FastAPI-Service implementiert und bietet RESTful Zugriff auf alle Kernfunktionen:
 
-- **Audio Analysis Engine**: Audio-Verarbeitung und Feature-Extraktion
-- **Playlist Engine**: Intelligente Playlist-Generierung
-- **Export Engine**: Verschiedene Export-Formate
-- **Cache Manager**: Effiziente Datenverwaltung
-- **GUI Components**: Benutzeroberflächen-Komponenten
+- **Analysis API**: Audio-Verarbeitung und Feature-Extraktion via Background Tasks
+- **Tracks API**: Track-Verwaltung und Metadaten-Abfrage
+- **Playlists API**: Intelligente Playlist-Generierung mit verschiedenen Algorithmen
+- **Export API**: Verschiedene Export-Formate (M3U, Rekordbox XML, JSON)
+- **Cache Management**: Effiziente Datenverwaltung mit automatischer Bereinigung
+- **Health Monitoring**: System-Status und Performance-Metriken
 
-## 🏗️ Architektur-Übersicht
+## 🏗️ Backend-Architektur
 
 ```
-src/
-├── audio_analysis/          # Audio-Analyse-Module
-│   ├── analyzer.py          # Haupt-Analyzer
-│   ├── feature_extractor.py # Feature-Extraktion
-│   ├── essentia_integration.py # Essentia-Integration
-│   └── cache_manager.py     # Cache-Verwaltung
-├── playlist_engine/         # Playlist-Generierung
-│   ├── generator.py         # Playlist-Generator
-│   ├── camelot_wheel.py     # Harmonische Analyse
-│   ├── similarity_engine.py # Ähnlichkeits-Berechnung
-│   └── optimizer.py         # Playlist-Optimierung
-├── export/                  # Export-Funktionen
-│   ├── playlist_exporter.py # Playlist-Export
-│   ├── rekordbox_exporter.py # Rekordbox-Integration
-│   └── csv_exporter.py      # CSV-Export
-└── gui/                     # GUI-Komponenten
-    ├── main_window.py       # Hauptfenster
-    ├── track_browser.py     # Track-Browser
-    └── playlist_dashboard.py # Playlist-Dashboard
+backend/
+├── main.py                    # FastAPI App Entry Point
+├── api/
+│   ├── endpoints/
+│   │   ├── analysis.py         # Audio-Analyse Endpunkte
+│   │   ├── tracks.py           # Track-Management API  
+│   │   └── playlists.py        # Playlist-Generierung API
+│   └── models.py               # Pydantic Request/Response Models
+├── core_engine/
+│   ├── audio_analysis/
+│   │   ├── analyzer.py         # Haupt-Audio-Analyzer
+│   │   └── feature_extractor.py # Modulare Feature-Extraktion
+│   ├── data_management/
+│   │   └── cache_manager.py    # JSON-basierter Cache
+│   ├── playlist_engine/
+│   │   └── playlist_engine.py  # Intelligente Playlist-Algorithmen
+│   ├── mood_classifier/
+│   │   └── mood_classifier.py  # Heuristik-basierte Stimmungsanalyse
+│   └── export/
+│       └── playlist_exporter.py # Multi-Format Export
+└── config/
+    └── settings.py             # Konfiguration
 ```
 
-## 📖 Module-Dokumentation
+## 🔌 REST API Endpunkte
 
-### Audio Analysis Engine
-
-#### AudioAnalyzer
-
-**Klasse**: `src.audio_analysis.analyzer.AudioAnalyzer`
-
-**Beschreibung**: Haupt-Klasse für Audio-Analyse mit Unterstützung für verschiedene Algorithmen.
-
-**Initialisierung**:
-```python
-from src.audio_analysis.analyzer import AudioAnalyzer
-
-analyzer = AudioAnalyzer(
-    use_essentia=True,
-    use_librosa=True,
-    cache_enabled=True,
-    quality='high'
-)
+### Base URL
+```
+http://localhost:8000/api
 ```
 
-**Parameter**:
-- `use_essentia` (bool): Essentia für erweiterte Analyse verwenden
-- `use_librosa` (bool): librosa für Basis-Analyse verwenden
-- `cache_enabled` (bool): Cache-System aktivieren
-- `quality` (str): Analyse-Qualität ('low', 'medium', 'high', 'ultra')
+### Health & Status
 
-**Methoden**:
+#### GET /health
 
-##### `analyze_file(file_path: str) -> Dict[str, Any]`
+Prüft Server-Status und -Verfügbarkeit.
 
-Analysiert eine einzelne Audio-Datei.
-
-**Parameter**:
-- `file_path` (str): Pfad zur Audio-Datei
-
-**Rückgabe**:
-```python
-{
-    'bpm': 128.0,
-    'key': 'Am',
-    'camelot': '8A',
-    'energy': 75.5,
-    'mood': 'energetic',
-    'duration': 245.3,
-    'confidence': {
-        'bpm': 0.95,
-        'key': 0.87,
-        'energy': 0.92,
-        'mood': 0.78
-    },
-    'features': {
-        'mfcc': [...],
-        'chroma': [...],
-        'spectral_centroid': 1500.2,
-        'rms_energy': 0.15
-    }
-}
-```
-
-**Beispiel**:
-```python
-result = analyzer.analyze_file('path/to/track.mp3')
-print(f"BPM: {result['bpm']}, Key: {result['key']}")
-```
-
-##### `batch_analyze(file_paths: List[str], callback=None) -> List[Dict[str, Any]]`
-
-Analysiert mehrere Audio-Dateien parallel.
-
-**Parameter**:
-- `file_paths` (List[str]): Liste von Dateipfaden
-- `callback` (callable, optional): Fortschritts-Callback
-
-**Callback-Signatur**:
-```python
-def progress_callback(current: int, total: int, file_path: str):
-    print(f"Fortschritt: {current}/{total} - {file_path}")
-```
-
-**Beispiel**:
-```python
-files = ['track1.mp3', 'track2.mp3', 'track3.mp3']
-results = analyzer.batch_analyze(files, callback=progress_callback)
-```
-
-#### FeatureExtractor
-
-**Klasse**: `src.audio_analysis.feature_extractor.FeatureExtractor`
-
-**Beschreibung**: Spezialisierte Klasse für Audio-Feature-Extraktion.
-
-**Methoden**:
-
-##### `extract_bpm(audio_data: np.ndarray, sr: int) -> Tuple[float, float]`
-
-Extrahiert BPM aus Audio-Daten.
-
-**Parameter**:
-- `audio_data` (np.ndarray): Audio-Signal
-- `sr` (int): Sample-Rate
-
-**Rückgabe**:
-- Tuple[float, float]: (BPM, Konfidenz)
-
-**Beispiel**:
-```python
-import librosa
-from src.audio_analysis.feature_extractor import FeatureExtractor
-
-audio, sr = librosa.load('track.mp3')
-extractor = FeatureExtractor()
-bpm, confidence = extractor.extract_bpm(audio, sr)
-```
-
-##### `extract_key(audio_data: np.ndarray, sr: int) -> Tuple[str, str, float]`
-
-Extrahiert Tonart aus Audio-Daten.
-
-**Rückgabe**:
-- Tuple[str, str, float]: (Key, Camelot, Konfidenz)
-
-##### `extract_energy(audio_data: np.ndarray, sr: int) -> float`
-
-Berechnet Energie-Level des Tracks.
-
-**Rückgabe**:
-- float: Energie-Level (0-100)
-
-#### EssentiaIntegration
-
-**Klasse**: `src.audio_analysis.essentia_integration.EssentiaIntegration`
-
-**Beschreibung**: Integration von Essentia für erweiterte Audio-Analyse.
-
-**Methoden**:
-
-##### `analyze_with_essentia(file_path: str) -> Dict[str, Any]`
-
-Vollständige Essentia-Analyse.
-
-**Beispiel**:
-```python
-from src.audio_analysis.essentia_integration import EssentiaIntegration
-
-essentia = EssentiaIntegration()
-result = essentia.analyze_with_essentia('track.mp3')
-```
-
-### Playlist Engine
-
-#### PlaylistGenerator
-
-**Klasse**: `src.playlist_engine.generator.PlaylistGenerator`
-
-**Beschreibung**: Intelligente Playlist-Generierung mit verschiedenen Algorithmen.
-
-**Initialisierung**:
-```python
-from src.playlist_engine.generator import PlaylistGenerator
-
-generator = PlaylistGenerator(
-    algorithm='beam_search',
-    beam_width=5,
-    lookahead=3
-)
-```
-
-**Methoden**:
-
-##### `generate_playlist(tracks: List[Dict], preset: Dict, target_duration: int = None) -> List[Dict]`
-
-Generiert eine optimierte Playlist.
-
-**Parameter**:
-- `tracks` (List[Dict]): Verfügbare Tracks
-- `preset` (Dict): Playlist-Preset-Konfiguration
-- `target_duration` (int, optional): Ziel-Dauer in Sekunden
-
-**Preset-Format**:
-```python
-preset = {
-    'name': 'Progressive House',
-    'bpm_range': [120, 130],
-    'energy_curve': 'gradual_buildup',
-    'harmony_strictness': 0.8,
-    'mood_consistency': 0.7,
-    'rules': {
-        'max_bpm_jump': 3,
-        'key_compatibility': 'camelot_wheel',
-        'avoid_back_to_back_same_artist': True
-    }
-}
-```
-
-**Beispiel**:
-```python
-tracks = [...]  # Liste von analysierten Tracks
-playlist = generator.generate_playlist(tracks, preset, target_duration=3600)
-```
-
-#### CamelotWheel
-
-**Klasse**: `src.playlist_engine.camelot_wheel.CamelotWheel`
-
-**Beschreibung**: Harmonische Kompatibilitäts-Analyse basierend auf dem Camelot Wheel.
-
-**Methoden**:
-
-##### `get_compatible_keys(key: str) -> List[str]`
-
-Gibt kompatible Keys für harmonische Übergänge zurück.
-
-**Parameter**:
-- `key` (str): Ausgangs-Key (z.B. '8A', 'Am', 'C')
-
-**Rückgabe**:
-- List[str]: Liste kompatibler Keys
-
-**Beispiel**:
-```python
-from src.playlist_engine.camelot_wheel import CamelotWheel
-
-wheel = CamelotWheel()
-compatible = wheel.get_compatible_keys('8A')
-print(compatible)  # ['7A', '8A', '9A', '8B']
-```
-
-##### `calculate_compatibility(key1: str, key2: str) -> float`
-
-Berechnet Kompatibilitäts-Score zwischen zwei Keys.
-
-**Rückgabe**:
-- float: Kompatibilitäts-Score (0.0-1.0)
-
-#### SimilarityEngine
-
-**Klasse**: `src.playlist_engine.similarity_engine.SimilarityEngine`
-
-**Beschreibung**: k-NN basierte Ähnlichkeits-Berechnung für Tracks.
-
-**Methoden**:
-
-##### `find_similar_tracks(target_track: Dict, tracks: List[Dict], k: int = 5) -> List[Tuple[Dict, float]]`
-
-Findet ähnliche Tracks basierend auf Audio-Features.
-
-**Parameter**:
-- `target_track` (Dict): Ziel-Track
-- `tracks` (List[Dict]): Verfügbare Tracks
-- `k` (int): Anzahl ähnlicher Tracks
-
-**Rückgabe**:
-- List[Tuple[Dict, float]]: Liste von (Track, Ähnlichkeits-Score)
-
-**Beispiel**:
-```python
-from src.playlist_engine.similarity_engine import SimilarityEngine
-
-engine = SimilarityEngine()
-similar = engine.find_similar_tracks(target_track, all_tracks, k=10)
-```
-
-### Export Engine
-
-#### PlaylistExporter
-
-**Klasse**: `src.export.playlist_exporter.PlaylistExporter`
-
-**Beschreibung**: Export von Playlists in verschiedene Formate.
-
-**Methoden**:
-
-##### `export_m3u(playlist: List[Dict], file_path: str, relative_paths: bool = True) -> bool`
-
-Exportiert Playlist als M3U-Datei.
-
-**Parameter**:
-- `playlist` (List[Dict]): Playlist-Daten
-- `file_path` (str): Ziel-Dateipfad
-- `relative_paths` (bool): Relative Pfade verwenden
-
-**Beispiel**:
-```python
-from src.export.playlist_exporter import PlaylistExporter
-
-exporter = PlaylistExporter()
-success = exporter.export_m3u(playlist, 'my_playlist.m3u')
-```
-
-##### `export_rekordbox_xml(playlist: List[Dict], file_path: str, options: Dict = None) -> bool`
-
-Exportiert Playlist als Rekordbox-kompatible XML-Datei.
-
-**Options-Format**:
-```python
-options = {
-    'include_analysis': True,
-    'include_cues': True,
-    'include_beatgrid': True,
-    'path_format': 'relative'
-}
-```
-
-#### RekordboxExporter
-
-**Klasse**: `src.export.rekordbox_exporter.RekordboxExporter`
-
-**Beschreibung**: Spezialisierter Rekordbox-Export mit erweiterten Features.
-
-**Methoden**:
-
-##### `merge_with_collection(playlist: List[Dict], collection_path: str, backup: bool = True) -> bool`
-
-Integriert Playlist in bestehende Rekordbox-Collection.
-
-**Parameter**:
-- `playlist` (List[Dict]): Playlist-Daten
-- `collection_path` (str): Pfad zur collection.xml
-- `backup` (bool): Backup vor Änderungen erstellen
-
-### Cache Manager
-
-#### CacheManager
-
-**Klasse**: `src.audio_analysis.cache_manager.CacheManager`
-
-**Beschreibung**: Effiziente Verwaltung von Analyse-Ergebnissen.
-
-**Methoden**:
-
-##### `get_cached_analysis(file_path: str) -> Dict[str, Any] | None`
-
-Lädt gecachte Analyse-Ergebnisse.
-
-##### `cache_analysis(file_path: str, analysis_result: Dict[str, Any]) -> bool`
-
-Speichert Analyse-Ergebnisse im Cache.
-
-##### `clear_cache(older_than_days: int = None) -> int`
-
-Bereinigt Cache-Einträge.
-
-**Beispiel**:
-```python
-from src.audio_analysis.cache_manager import CacheManager
-
-cache = CacheManager()
-
-# Cache prüfen
-cached = cache.get_cached_analysis('track.mp3')
-if cached is None:
-    # Analyse durchführen
-    result = analyzer.analyze_file('track.mp3')
-    cache.cache_analysis('track.mp3', result)
-else:
-    result = cached
-```
-
-## 🔧 Konfiguration
-
-### Konfigurationsdateien
-
-#### settings.json
-
-**Pfad**: `config/settings.json`
-
-**Struktur**:
+**Response**:
 ```json
 {
-  "audio_analysis": {
-    "quality": "high",
-    "use_essentia": true,
-    "use_librosa": true,
-    "bpm_range": [60, 200],
-    "key_confidence_threshold": 0.7
-  },
-  "playlist_engine": {
-    "default_algorithm": "beam_search",
-    "beam_width": 5,
-    "lookahead": 3,
-    "similarity_threshold": 0.8
-  },
-  "cache": {
-    "enabled": true,
-    "max_size_gb": 2,
-    "cleanup_days": 30,
-    "compression": true
-  },
-  "export": {
-    "default_format": "m3u",
-    "relative_paths": true,
-    "include_metadata": true
+  "status": "healthy",
+  "timestamp": "2025-01-07T10:30:00Z",
+  "version": "2.0.0",
+  "components": {
+    "cache": "healthy",
+    "analyzer": "healthy",
+    "essentia": true
   }
 }
 ```
 
-### Umgebungsvariablen
+### Audio Analysis API
+
+#### POST /analysis/start
+
+Startet die Audio-Analyse als Background Task.
+
+**Request**:
+```json
+{
+  "directories": ["/path/to/music"],
+  "file_paths": null,
+  "recursive": true,
+  "overwrite_cache": false,
+  "include_patterns": null,
+  "exclude_patterns": null
+}
+```
+
+**Response**:
+```json
+{
+  "task_id": "analysis_20250107_103000_0",
+  "status": "started",
+  "message": "Audio analysis started",
+  "total_files": 127,
+  "invalid_files": 0,
+  "directories_scanned": 1,
+  "status_url": "/api/analysis/analysis_20250107_103000_0/status",
+  "overwrite_cache": false
+}
+```
+
+#### GET /analysis/{task_id}/status
+
+Abfrage des aktuellen Analyse-Status.
+
+**Response**:
+```json
+{
+  "status": "running",
+  "progress": 42.5,
+  "current_file": "track_042.mp3",
+  "processed_files": 54,
+  "total_files": 127,
+  "errors": [],
+  "started_at": "2025-01-07T10:30:00Z",
+  "estimated_completion": "2025-01-07T10:35:30Z"
+}
+```
+
+#### POST /analysis/{task_id}/cancel
+
+Bricht eine laufende Analyse ab.
+
+#### GET /analysis/cache/stats
+
+Cache-Statistiken abrufen.
+
+### Tracks API
+
+#### GET /tracks
+
+Alle analysierten Tracks mit Filter-Optionen abrufen.
+
+**Query Parameter**:
+- `limit` (int): Maximale Anzahl Tracks (default: 50)
+- `offset` (int): Skip-Anzahl für Pagination (default: 0)
+- `bpm_min` (float): Minimale BPM
+- `bpm_max` (float): Maximale BPM  
+- `key` (str): Specific Key (z.B. "Am", "8A")
+- `mood` (str): Gewünschte Stimmung
+- `search` (str): Volltext-Suche in Titel/Artist
+
+**Response**:
+```json
+{
+  "tracks": [
+    {
+      "file_path": "/music/track.mp3",
+      "filename": "track.mp3",
+      "features": {
+        "bpm": 128.0,
+        "energy": 0.75,
+        "valence": 0.68,
+        "danceability": 0.82
+      },
+      "metadata": {
+        "title": "Example Track",
+        "artist": "Example Artist",
+        "duration": 245.3
+      },
+      "camelot": {
+        "key": "Am",
+        "camelot": "8A",
+        "compatible_keys": ["7A", "8A", "9A", "8B"]
+      },
+      "mood": {
+        "primary_mood": "driving",
+        "confidence": 0.85,
+        "scores": {
+          "driving": 0.85,
+          "euphoric": 0.23,
+          "chill": 0.12
+        }
+      }
+    }
+  ],
+  "total": 1,
+  "limit": 50,
+  "offset": 0
+}
+```
+
+#### GET /tracks/{track_id}
+
+Einzelnen Track mit allen Details abrufen.
+
+#### GET /tracks/similar/{track_id}
+
+Ähnliche Tracks basierend auf Audio-Features finden.
+
+**Query Parameter**:
+- `limit` (int): Anzahl ähnlicher Tracks (default: 10)
+- `algorithm` (str): Similarity-Algorithmus (default: "cosine")
+
+### Playlists API
+
+#### POST /playlists/generate
+
+Intelligente Playlist-Generierung.
+
+**Request**:
+```json
+{
+  "preset": "progressive_house",
+  "target_duration": 3600,
+  "start_track_id": null,
+  "options": {
+    "bpm_range": [120, 130],
+    "energy_curve": "gradual_buildup",
+    "harmony_strictness": 0.8,
+    "avoid_repetition": true
+  }
+}
+```
+
+**Response**:
+```json
+{
+  "playlist_id": "playlist_20250107_103500",
+  "tracks": [
+    {
+      "track_id": "track_001",
+      "position": 0,
+      "transition_score": 0.92,
+      "reason": "harmonic_compatibility"
+    }
+  ],
+  "metadata": {
+    "total_tracks": 18,
+    "total_duration": 3847,
+    "average_bpm": 125.3,
+    "energy_progression": "gradual_buildup",
+    "mood_consistency": 0.84
+  }
+}
+```
+
+#### GET /playlists
+
+Alle gespeicherten Playlists abrufen.
+
+#### GET /playlists/{playlist_id}
+
+Einzelne Playlist mit allen Tracks abrufen.
+
+#### DELETE /playlists/{playlist_id}
+
+Playlist löschen.
+
+### Export API
+
+#### POST /playlists/{playlist_id}/export
+
+Playlist in verschiedene Formate exportieren.
+
+**Request**:
+```json
+{
+  "format": "m3u",
+  "options": {
+    "relative_paths": true,
+    "include_metadata": true,
+    "path_prefix": "/Music"
+  }
+}
+```
+
+**Supported Formats**:
+- `m3u`: Standard M3U Playlist
+- `m3u8`: Extended M3U with metadata
+- `rekordbox_xml`: Rekordbox-kompatibles XML
+- `json`: JSON-Format für APIs
+- `csv`: CSV für Spreadsheets
+
+### Configuration API
+
+#### GET /config/presets
+
+Alle verfügbaren Playlist-Presets abrufen.
+
+#### GET /config/settings
+
+Aktuelle System-Einstellungen abrufen.
+
+#### PUT /config/settings
+
+System-Einstellungen aktualisieren.
+
+## 📊 Response Models
+
+### Standard-Response-Format
+
+Alle API-Responses folgen einem einheitlichen Format:
+
+#### Success Response
+```json
+{
+  "status": "success",
+  "data": { /* Response data */ },
+  "message": "Operation completed successfully",
+  "timestamp": "2025-01-07T10:30:00Z"
+}
+```
+
+#### Error Response
+```json
+{
+  "status": "error",
+  "error": {
+    "code": "VALIDATION_ERROR",
+    "message": "Invalid request parameters",
+    "details": {
+      "field": "bpm_range",
+      "issue": "Minimum BPM cannot be greater than maximum BPM"
+    }
+  },
+  "timestamp": "2025-01-07T10:30:00Z"
+}
+```
+
+### HTTP Status Codes
+
+- `200 OK`: Successful request
+- `201 Created`: Resource created successfully  
+- `202 Accepted`: Request accepted (async processing)
+- `400 Bad Request`: Invalid request parameters
+- `404 Not Found`: Resource not found
+- `422 Unprocessable Entity`: Validation error
+- `500 Internal Server Error`: Server error
+- `503 Service Unavailable`: Service temporarily unavailable
+
+## 🔐 Authentication & Security
+
+### API Key Authentication (Optional)
+
+Wenn aktiviert, wird ein API-Key für alle Requests benötigt:
 
 ```bash
-# Cache-Verzeichnis
-DJ_TOOL_CACHE_DIR=/path/to/cache
-
-# Log-Level
-DJ_TOOL_LOG_LEVEL=INFO
-
-# Rekordbox-Pfad
-DJ_TOOL_REKORDBOX_PATH=/path/to/rekordbox
-
-# Performance-Einstellungen
-DJ_TOOL_MAX_WORKERS=4
-DJ_TOOL_MEMORY_LIMIT=4096
+curl -H "X-API-Key: your-api-key" \
+     http://localhost:8000/api/tracks
 ```
 
-## 🧪 Testing API
+### CORS Configuration
 
-### Unit Tests
+FastAPI ist für Cross-Origin-Requests konfiguriert:
 
-**Test-Framework**: pytest
-
-**Beispiel-Test**:
 ```python
-import pytest
-from src.audio_analysis.analyzer import AudioAnalyzer
+from fastapi.middleware.cors import CORSMiddleware
 
-def test_audio_analyzer_initialization():
-    analyzer = AudioAnalyzer(use_essentia=True)
-    assert analyzer.use_essentia is True
-    assert analyzer.cache_enabled is True
-
-def test_bpm_detection():
-    analyzer = AudioAnalyzer()
-    # Mock-Audio-Daten verwenden
-    result = analyzer.analyze_file('tests/fixtures/test_track.mp3')
-    assert 'bpm' in result
-    assert isinstance(result['bpm'], float)
-    assert 60 <= result['bpm'] <= 200
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],  # Configure for production
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 ```
 
-### Integration Tests
+## 🔧 Konfiguration
 
-**Beispiel**:
-```python
-def test_full_workflow():
-    # Audio-Analyse
-    analyzer = AudioAnalyzer()
-    tracks = analyzer.batch_analyze(['track1.mp3', 'track2.mp3'])
-    
-    # Playlist-Generierung
-    generator = PlaylistGenerator()
-    preset = load_preset('progressive_house')
-    playlist = generator.generate_playlist(tracks, preset)
-    
-    # Export
-    exporter = PlaylistExporter()
-    success = exporter.export_m3u(playlist, 'test_playlist.m3u')
-    
-    assert success is True
-    assert len(playlist) > 0
+### Environment Variables
+
+```bash
+# Server Configuration
+HOST=localhost
+PORT=8000
+DEBUG=true
+
+# Audio Analysis
+AUDIO_CACHE_DIR=./data/cache
+MAX_FILE_SIZE_MB=500
+ENABLE_MULTIPROCESSING=true
+MAX_WORKERS=4
+
+# Music Library
+MUSIC_LIBRARY_PATH=/path/to/music
+SCAN_RECURSIVE=true
+MIN_FILE_SIZE_KB=100
+
+# Performance
+ENABLE_UVLOOP=true
+WORKER_TIMEOUT=300
 ```
 
-### Mock-Objekte
+### Backend Settings
 
-**Audio-Mock**:
-```python
-import numpy as np
-from unittest.mock import Mock
-
-def create_mock_audio(duration=30, sr=22050, bpm=128):
-    """Erstellt Mock-Audio-Daten für Tests."""
-    samples = int(duration * sr)
-    # Einfaches Sinussignal mit Beat-Pattern
-    t = np.linspace(0, duration, samples)
-    beat_freq = bpm / 60
-    audio = np.sin(2 * np.pi * 440 * t) * np.sin(2 * np.pi * beat_freq * t)
-    return audio, sr
+```json
+{
+  "audio_analysis": {
+    "cache_dir": "./data/cache",
+    "enable_multiprocessing": true,
+    "max_workers": 4,
+    "supported_formats": [".mp3", ".wav", ".flac", ".aac", ".ogg", ".m4a"]
+  },
+  "music_library": {
+    "scan_path": "/path/to/music",
+    "max_depth": 10,
+    "min_file_size_kb": 100,
+    "exclude_patterns": ["*/.git/*", "*/temp/*"]
+  },
+  "playlist_engine": {
+    "default_algorithm": "harmonic",
+    "camelot_wheel_enabled": true,
+    "energy_analysis_enabled": true
+  }
+}
 ```
 
-## 🔌 Plugin-System
+## 📊 Performance & Monitoring
 
-### Custom Analyzer Plugin
+### Health Check Endpoint
 
-**Interface**:
-```python
-from abc import ABC, abstractmethod
+```bash
+# Basic health check
+GET /health
 
-class AnalyzerPlugin(ABC):
-    @abstractmethod
-    def analyze(self, audio_data: np.ndarray, sr: int) -> Dict[str, Any]:
-        """Analysiert Audio-Daten und gibt Ergebnisse zurück."""
-        pass
-    
-    @abstractmethod
-    def get_name(self) -> str:
-        """Gibt den Plugin-Namen zurück."""
-        pass
+# Detailed system info
+GET /health/detailed
 ```
 
-**Beispiel-Plugin**:
-```python
-class CustomBPMAnalyzer(AnalyzerPlugin):
-    def analyze(self, audio_data, sr):
-        # Custom BPM-Algorithmus
-        bpm = self._detect_bpm(audio_data, sr)
-        return {'custom_bpm': bpm}
-    
-    def get_name(self):
-        return "Custom BPM Analyzer"
-    
-    def _detect_bpm(self, audio_data, sr):
-        # Implementierung des BPM-Algorithmus
-        pass
+### Metrics & Statistics
+
+```bash
+# Analysis statistics
+GET /api/analysis/stats
+
+# Cache statistics  
+GET /api/analysis/cache/stats
+
+# System performance
+GET /api/system/stats
 ```
 
-### Plugin-Registration
+### Background Task Monitoring
 
-```python
-from src.audio_analysis.analyzer import AudioAnalyzer
+```bash
+# Active background tasks
+GET /api/tasks/active
 
-analyzer = AudioAnalyzer()
-analyzer.register_plugin(CustomBPMAnalyzer())
+# Task history
+GET /api/tasks/history
 ```
 
-## 📊 Performance-Monitoring
+## 🧠 Testing & Development
 
-### Profiling
+### API Testing mit curl
 
-```python
-import cProfile
-import pstats
-from src.audio_analysis.analyzer import AudioAnalyzer
+```bash
+# Server starten
+uvicorn backend.main:app --reload --port 8000
 
-def profile_analysis():
-    analyzer = AudioAnalyzer()
-    analyzer.analyze_file('large_track.mp3')
+# Health check
+curl http://localhost:8000/health
 
-# Profiling ausführen
-cProfile.run('profile_analysis()', 'analysis_profile.prof')
+# Analyse starten
+curl -X POST "http://localhost:8000/api/analysis/start" \
+     -H "Content-Type: application/json" \
+     -d '{"directories": ["/path/to/music"]}'
 
-# Ergebnisse anzeigen
-stats = pstats.Stats('analysis_profile.prof')
-stats.sort_stats('cumulative').print_stats(10)
+# Status prüfen
+curl "http://localhost:8000/api/analysis/task_id/status"
+
+# Tracks abrufen
+curl "http://localhost:8000/api/tracks?limit=10&bpm_min=120"
 ```
 
-### Memory-Monitoring
+### Automated Testing
 
-```python
-import tracemalloc
-from src.audio_analysis.analyzer import AudioAnalyzer
+```bash
+# Run tests
+pytest tests/ -v
 
-tracemalloc.start()
+# Run with coverage
+pytest tests/ --cov=backend --cov-report=html
 
-analyzer = AudioAnalyzer()
-result = analyzer.analyze_file('track.mp3')
+# API integration tests
+pytest tests/test_api_endpoints.py -v
+```
 
-current, peak = tracemalloc.get_traced_memory()
-print(f"Current memory usage: {current / 1024 / 1024:.1f} MB")
-print(f"Peak memory usage: {peak / 1024 / 1024:.1f} MB")
+### Interactive API Documentation
 
-tracemalloc.stop()
+```bash
+# Swagger UI
+http://localhost:8000/docs
+
+# ReDoc  
+http://localhost:8000/redoc
+
+# OpenAPI JSON
+http://localhost:8000/openapi.json
+```
+
+### Development Server
+
+```bash
+# Development with auto-reload
+uvicorn backend.main:app --reload --host 0.0.0.0 --port 8000
+
+# Production server
+uvicorn backend.main:app --host 0.0.0.0 --port 8000 --workers 4
 ```
 
 ## 🚀 Deployment
 
-### Standalone-Anwendung
+### Docker Deployment
 
-**PyInstaller-Konfiguration**:
-```python
-# build.spec
-a = Analysis(
-    ['main.py'],
-    pathex=['.'],
-    binaries=[],
-    datas=[
-        ('config', 'config'),
-        ('presets', 'presets'),
-        ('templates', 'templates')
-    ],
-    hiddenimports=[
-        'essentia',
-        'librosa',
-        'PySide6'
-    ],
-    hookspath=[],
-    runtime_hooks=[],
-    excludes=[],
-    win_no_prefer_redirects=False,
-    win_private_assemblies=False,
-    cipher=None,
-    noarchive=False
-)
-```
-
-**Build-Befehl**:
-```bash
-pyinstaller build.spec --onefile --windowed
-```
-
-### Docker-Deployment
-
-**Dockerfile**:
 ```dockerfile
-FROM python:3.9-slim
+FROM python:3.11-slim
 
 WORKDIR /app
 
-# System-Abhängigkeiten
+# System dependencies for audio processing
 RUN apt-get update && apt-get install -y \
     libsndfile1 \
     ffmpeg \
+    libffi-dev \
     && rm -rf /var/lib/apt/lists/*
 
-# Python-Abhängigkeiten
+# Python dependencies
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Anwendung kopieren
-COPY . .
+# Copy application
+COPY backend/ ./backend/
+COPY data/ ./data/
 
-# Benutzer erstellen
-RUN useradd -m djuser
-USER djuser
+# Non-root user for security
+RUN useradd -m -u 1001 djapi
+USER djapi
 
 EXPOSE 8000
 
-CMD ["python", "main.py"]
+# Use uvicorn for production
+CMD ["uvicorn", "backend.main:app", "--host", "0.0.0.0", "--port", "8000"]
 ```
 
-## 🔗 API-Referenz Links
+### Docker Compose
 
-- [Audio Analysis API](audio-analysis.md)
-- [Playlist Engine API](playlist-engine.md)
-- [Export Engine API](export-engine.md)
-- [GUI Components API](gui-components.md)
-- [Cache Manager API](cache-manager.md)
-- [Utilities API](utilities.md)
+```yaml
+version: '3.8'
 
-## 📞 Support
+services:
+  dj-api:
+    build: .
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./data:/app/data
+      - /path/to/music:/music:ro
+    environment:
+      - MUSIC_LIBRARY_PATH=/music
+      - DEBUG=false
+      - MAX_WORKERS=4
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
 
-Für API-spezifische Fragen:
+  nginx:
+    image: nginx:alpine
+    ports:
+      - "80:80"
+    depends_on:
+      - dj-api
+```
 
-1. **Dokumentation**: Konsultieren Sie die detaillierten Module-Dokumentationen
-2. **Beispiele**: Schauen Sie in das `examples/` Verzeichnis
-3. **Tests**: Referenz-Implementierungen in `tests/`
-4. **Issues**: GitHub Issues für Bug-Reports und Feature-Requests
+### Kubernetes Deployment
+
+```yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: dj-api
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: dj-api
+  template:
+    metadata:
+      labels:
+        app: dj-api
+    spec:
+      containers:
+      - name: dj-api
+        image: dj-audio-api:latest
+        ports:
+        - containerPort: 8000
+        env:
+        - name: MAX_WORKERS
+          value: "2"
+        resources:
+          requests:
+            memory: "512Mi"
+            cpu: "250m"
+          limits:
+            memory: "2Gi"
+            cpu: "1000m"
+```
+
+## 🔗 Weitere Ressourcen
+
+- [FastAPI Documentation](https://fastapi.tiangolo.com/)
+- [Swagger UI](http://localhost:8000/docs) (wenn Server läuft)
+- [ReDoc API Docs](http://localhost:8000/redoc)
+- [GitHub Repository](https://github.com/your-repo/audio-analysis-tool)
+
+## 📞 Support & Community
+
+Für Backend-API-spezifische Fragen:
+
+1. **Interactive Docs**: Swagger UI unter `/docs`
+2. **API Testing**: ReDoc unter `/redoc`
+3. **GitHub Issues**: Bug-Reports und Feature-Requests
+4. **Tests**: API-Integration-Tests in `tests/`
+5. **Examples**: API-Usage-Examples in `examples/api/`
+
+## 🚀 Next Steps
+
+1. **Development**: Lokalen Server starten mit `uvicorn backend.main:app --reload`
+2. **Testing**: API mit Swagger UI testen unter `http://localhost:8000/docs`
+3. **Integration**: Client-SDKs in verschiedenen Sprachen entwickeln
+4. **Deployment**: Docker-Container für Production-Environment
 
 ---
 
-**Version**: 2.0  
+**Version**: 2.0 (Phoenix Backend)  
+**Architecture**: FastAPI REST API  
 **Letzte Aktualisierung**: Januar 2025  
-**Kompatibilität**: Python 3.8+
+**Kompatibilität**: Python 3.9+

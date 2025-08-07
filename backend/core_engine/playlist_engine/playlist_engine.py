@@ -4,7 +4,7 @@ import json
 import os
 import math
 from typing import Dict, List, Optional, Tuple, Any, Callable
-from dataclasses import dataclass, asdict
+from dataclasses import dataclass, asdict, field
 from enum import Enum
 import logging
 from datetime import datetime
@@ -44,11 +44,7 @@ class PlaylistRule:
     description: str
     weight: float  # Gewichtung 0.0 - 1.0
     enabled: bool = True
-    parameters: Dict[str, Any] = None
-    
-    def __post_init__(self):
-        if self.parameters is None:
-            self.parameters = {}
+    parameters: Dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass
@@ -61,11 +57,7 @@ class PlaylistPreset:
     target_duration_minutes: Optional[int] = None
     energy_curve: str = "gradual_build"  # gradual_build, peak_valley, steady, custom
     mood_flow: str = "coherent"  # coherent, contrasting, mixed
-    created_at: str = None
-    
-    def __post_init__(self):
-        if self.created_at is None:
-            self.created_at = datetime.now().isoformat()
+    created_at: str = field(default_factory=lambda: datetime.now().isoformat())
 
 
 class PlaylistEngine:
@@ -295,9 +287,9 @@ class PlaylistEngine:
         
         return mood_scores
     
-    async def create_playlist_async(self, tracks: List[Dict], preset_name: str = None, 
-                                   custom_rules: List[PlaylistRule] = None, 
-                                   target_duration: int = None,
+    async def create_playlist_async(self, tracks: List[Dict], preset_name: Optional[str] = None, 
+                                   custom_rules: Optional[List[PlaylistRule]] = None, 
+                                   target_duration: Optional[int] = None,
                                    progress_callback: Optional[Callable] = None) -> Dict:
         """Erstellt eine optimierte Playlist asynchron"""
         
@@ -308,12 +300,20 @@ class PlaylistEngine:
             await progress_callback("Initialisiere Playlist-Generierung...")
         
         # Preset auswählen
-        preset = self._get_preset(preset_name) if preset_name else self.default_presets[0]
-        if not preset:
-            return {'error': f'Preset "{preset_name}" nicht gefunden'}
+        preset: PlaylistPreset
+        if preset_name:
+            preset_obj = self._get_preset(preset_name)
+            if not preset_obj:
+                return {'error': f'Preset "{preset_name}" nicht gefunden'}
+            preset = preset_obj
+        else:
+            # Standard-Preset verwenden (erster in der Liste)
+            if not self.default_presets:
+                return {'error': 'Keine Standard-Presets verfügbar'}
+            preset = self.default_presets[0] # Korrektur: Zugriff auf das erste Element der Liste
         
         # Custom Rules überschreiben Preset-Rules
-        rules = custom_rules if custom_rules else preset.rules
+        rules = custom_rules if custom_rules is not None else preset.rules
         
         if progress_callback:
             await progress_callback("Bereite Tracks vor...")
@@ -333,9 +333,10 @@ class PlaylistEngine:
             await progress_callback("Optimiere Playlist-Länge...")
         
         # Zieldauer berücksichtigen
-        if target_duration or preset.target_duration_minutes:
-            duration = target_duration or preset.target_duration_minutes
-            sorted_tracks = self._trim_to_duration(sorted_tracks, duration * 60)
+        if target_duration is not None or preset.target_duration_minutes is not None:
+            duration = target_duration if target_duration is not None else preset.target_duration_minutes
+            if duration is not None: # Sicherstellen, dass duration nicht None ist
+                sorted_tracks = self._trim_to_duration(sorted_tracks, duration * 60)
         
         if progress_callback:
             await progress_callback("Berechne Playlist-Metadaten...")
@@ -356,9 +357,9 @@ class PlaylistEngine:
             'status': 'completed'
         }
     
-    def create_playlist(self, tracks: List[Dict], preset_name: str = None, 
-                       custom_rules: List[PlaylistRule] = None, 
-                       target_duration: int = None) -> Dict:
+    def create_playlist(self, tracks: List[Dict], preset_name: Optional[str] = None, 
+                       custom_rules: Optional[List[PlaylistRule]] = None, 
+                       target_duration: Optional[int] = None) -> Dict:
         """Synchrone Version der Playlist-Erstellung"""
         return asyncio.run(self.create_playlist_async(tracks, preset_name, custom_rules, target_duration))
     
@@ -502,8 +503,9 @@ class PlaylistEngine:
         if progress_callback:
             await progress_callback("Analysiere harmonische Kompatibilität...")
         
-        sorted_tracks = [tracks[0]]
-        remaining_tracks = tracks[1:]
+        # Korrektur: sorted_tracks mit dem ersten Element initialisieren
+        sorted_tracks = [tracks[0]] if tracks else [] # Korrektur: tracks[0] statt tracks
+        remaining_tracks = tracks[1:] if tracks else []
         total_tracks = len(tracks)
         
         while remaining_tracks:
@@ -726,7 +728,7 @@ class PlaylistEngine:
             await progress_callback("Sortiere nach Hybrid-Score...")
         
         # Sortiere nach Gesamt-Score (absteigend)
-        scored_tracks.sort(key=lambda x: x[1], reverse=True)
+        scored_tracks.sort(key=lambda x: x[1], reverse=True) # Korrektur: x[1] für den Score
         
         return [track for track, score, components in scored_tracks]
     
@@ -867,7 +869,7 @@ class PlaylistEngine:
                 'name': preset.name,
                 'description': preset.description,
                 'algorithm': preset.algorithm.value,
-                'energy_curve': preset.energy_curve,
+                'energy_curve': preset.energy_curve, # Korrektur: energy_curve
                 'mood_flow': preset.mood_flow,
                 'target_duration_minutes': preset.target_duration_minutes,
                 'is_default': preset in self.default_presets,

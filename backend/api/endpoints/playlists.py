@@ -4,20 +4,22 @@ import logging
 import asyncio
 from typing import List, Optional
 from datetime import datetime
+import os
 
 from fastapi import APIRouter, HTTPException, BackgroundTasks, Query
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, FileResponse
 
-from ..models import (
+from backend.api.models import (
     PlaylistGenerationRequest, PlaylistGenerationResponse, PlaylistExportRequest, 
     PlaylistExportResponse, PlaylistPresetInfo, PlaylistPresetDetails,
-    PresetsListResponse, PresetDetailsResponse, PresetCreationRequest,
-    SortingAlgorithm, ExportFormat, SuccessResponse, ErrorResponse
+    PresetsListResponse, PresetCreationRequest,
+    SortingAlgorithm, ExportFormat, SuccessResponse, ErrorResponse,
+    Playlist # Importiere Playlist-Modell
 )
-from ...core_engine.playlist_engine.playlist_engine import PlaylistEngine, PlaylistPreset, PlaylistRule
-from ...core_engine.export.playlist_exporter import PlaylistExporter
-from ...core_engine.audio_analysis.cache_manager import CacheManager
-from ...config.settings import settings
+from backend.core_engine.playlist_engine.playlist_engine import PlaylistEngine, PlaylistPreset, PlaylistRule
+from backend.core_engine.export.playlist_exporter import PlaylistExporter
+from backend.core_engine.data_management.database_manager import DatabaseManager
+from backend.config.settings import settings
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -25,7 +27,7 @@ router = APIRouter()
 # Global instances
 _playlist_engine = None
 _playlist_exporter = None
-_cache_manager = None
+_database_manager = None
 
 # Background task storage for playlist generation
 _active_playlist_tasks = {}
@@ -47,12 +49,12 @@ def get_playlist_exporter():
     return _playlist_exporter
 
 
-def get_cache_manager():
-    """Get CacheManager instance"""
-    global _cache_manager
-    if _cache_manager is None:
-        _cache_manager = CacheManager(settings.get("audio_analysis.cache_dir"))
-    return _cache_manager
+def get_database_manager():
+    """Get DatabaseManager instance"""
+    global _database_manager
+    if _database_manager is None:
+        _database_manager = DatabaseManager(settings.get("audio_analysis.db_path", "data/database.db"))
+    return _database_manager
 
 
 async def generate_playlist_task(
@@ -73,11 +75,11 @@ async def generate_playlist_task(
         }
         
         # Load track data from cache
-        cache_manager = get_cache_manager()
+        database_manager = get_database_manager()
         tracks = []
         
         for i, track_path in enumerate(track_paths):
-            track_data = cache_manager.load_from_cache(track_path)
+            track_data = database_manager.load_from_cache(track_path)
             if track_data:
                 tracks.append(track_data)
             else:
@@ -182,7 +184,7 @@ async def list_presets():
         raise HTTPException(status_code=500, detail="Failed to list presets")
 
 
-@router.get("/presets/{preset_name}", response_model=PresetDetailsResponse, summary="Get preset details")
+@router.get("/presets/{preset_name}", response_model=PlaylistPresetDetails, summary="Get preset details")
 async def get_preset_details(preset_name: str):
     """
     Gibt detaillierte Informationen zu einem spezifischen Preset zurück.
@@ -196,7 +198,7 @@ async def get_preset_details(preset_name: str):
         
         preset = PlaylistPresetDetails(**preset_data)
         
-        return PresetDetailsResponse(preset=preset)
+        return preset
         
     except HTTPException:
         raise
@@ -228,6 +230,7 @@ async def create_preset(preset_request: PresetCreationRequest):
         
         if success:
             return SuccessResponse(
+                success=True,
                 message=f"Preset '{preset_request.name}' created successfully",
                 data={'preset_name': preset_request.name}
             )
@@ -239,30 +242,6 @@ async def create_preset(preset_request: PresetCreationRequest):
     except Exception as e:
         logger.error(f"Error creating preset: {e}")
         raise HTTPException(status_code=500, detail="Failed to create preset")
-
-
-@router.delete("/presets/{preset_name}", response_model=SuccessResponse, summary="Delete custom preset")
-async def delete_preset(preset_name: str):
-    """
-    Löscht ein benutzerdefiniertes Preset.
-    Standard-Presets können nicht gelöscht werden.
-    """
-    try:
-        playlist_engine = get_playlist_engine()
-        success = playlist_engine.delete_custom_preset(preset_name)
-        
-        if success:
-            return SuccessResponse(
-                message=f"Preset '{preset_name}' deleted successfully"
-            )
-        else:
-            raise HTTPException(status_code=404, detail="Preset not found or cannot be deleted")
-            
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Error deleting preset: {e}")
-        raise HTTPException(status_code=500, detail="Failed to delete preset")
 
 
 @router.post("/generate", response_model=dict, summary="Generate playlist")
@@ -281,12 +260,16 @@ async def generate_playlist(
     """
     try:
         # Validate tracks exist in cache
-        cache_manager = get_cache_manager()
+        database_manager = get_database_manager()
         valid_tracks = []
         
         for track_path in request.track_file_paths:
-            if cache_manager.is_cached(track_path):
-                valid_tracks.append(track_path)
+            if database_manager.is_cached(track_path):
+                track = database_manager.load_from_cache(track_path)
+                if track:
+                    valid_tracks.append(track_path)
+                else:
+                    logger.warning(f"Track not found in cache: {track_path}")
             else:
                 logger.warning(f"Track not found in cache: {track_path}")
         
@@ -362,12 +345,14 @@ async def get_generation_result(task_id: str):
         result = task_info['result']
         return PlaylistGenerationResponse(
             success=True,
-            playlist=result,
-            generation_time_seconds=0  # Could be calculated from timestamps
+            playlist=Playlist(**result),
+            error=None, # explizit None setzen
+            generation_time_seconds=0
         )
     elif task_info['status'] == 'error':
         return PlaylistGenerationResponse(
             success=False,
+            playlist=None,
             error=task_info.get('error', 'Unknown error'),
             generation_time_seconds=0
         )
@@ -412,11 +397,17 @@ async def export_playlist(request: PlaylistExportRequest):
                 filename=result['filename'],
                 format_type=request.format_type,
                 track_count=result['track_count'],
-                file_size_bytes=result['file_size_bytes']
+                file_size_bytes=result['file_size_bytes'],
+                error=None
             )
         else:
             return PlaylistExportResponse(
                 success=False,
+                output_path=None,
+                filename=None,
+                format_type=request.format_type,
+                track_count=0,
+                file_size_bytes=0,
                 error=result['error']
             )
             
@@ -424,6 +415,11 @@ async def export_playlist(request: PlaylistExportRequest):
         logger.error(f"Error exporting playlist: {e}")
         return PlaylistExportResponse(
             success=False,
+            output_path=None,
+            filename=None,
+            format_type=request.format_type,
+            track_count=0,
+            file_size_bytes=0,
             error=str(e)
         )
 
@@ -449,7 +445,7 @@ async def list_exports():
 
 
 @router.delete("/exports/{filename}", response_model=SuccessResponse, summary="Delete exported playlist")
-async def delete_export(filename: str):
+async def delete_exported_playlist(filename: str): # Korrektur: Funktion umbenannt
     """
     Löscht eine exportierte Playlist-Datei.
     """
@@ -459,16 +455,57 @@ async def delete_export(filename: str):
         
         if success:
             return SuccessResponse(
-                message=f"Export '{filename}' deleted successfully"
+                success=True,
+                message=f"Export '{filename}' deleted successfully",
+                data={"filename": filename}
             )
         else:
-            raise HTTPException(status_code=404, detail="Export file not found")
+            raise HTTPException(status_code=404, detail="Export file not found or cannot be deleted")
             
     except HTTPException:
         raise
     except Exception as e:
         logger.error(f"Error deleting export: {e}")
         raise HTTPException(status_code=500, detail="Failed to delete export")
+
+
+@router.get("/exports/{playlist_id}/export", summary="Export a specific playlist by ID")
+async def export_playlist_by_id(
+    playlist_id: str,
+    format: ExportFormat = Query(..., description="Export format")
+):
+    """
+    Exportiert eine zuvor generierte Playlist nach ihrer Task-ID in das gewünschte Format.
+    """
+    if playlist_id not in _active_playlist_tasks:
+        raise HTTPException(status_code=404, detail="Playlist not found")
+
+    task_info = _active_playlist_tasks[playlist_id]
+
+    if task_info['status'] != 'completed' or 'result' not in task_info:
+        raise HTTPException(status_code=400, detail="Playlist not yet generated or an error occurred")
+
+    playlist_data = task_info['result']
+    playlist_exporter = get_playlist_exporter()
+
+    # Generate a default filename
+    output_filename = f"exported_playlist_{playlist_id}.{format.value}"
+    
+    export_result = playlist_exporter.export_playlist(
+        tracks=playlist_data.get('tracks', []),
+        format_type=format.value,
+        output_filename=output_filename,
+        metadata=playlist_data.get('metadata', {})
+    )
+
+    if export_result['success']:
+        return FileResponse(
+            path=export_result['output_path'],
+            filename=export_result['filename'],
+            media_type=f"application/{format.value}"
+        )
+    else:
+        raise HTTPException(status_code=500, detail=export_result.get('error', 'Failed to export playlist'))
 
 
 @router.get("/algorithms", summary="List available sorting algorithms")
@@ -497,7 +534,7 @@ async def validate_tracks_for_playlist(track_paths: List[str]):
     Validiert ob Tracks für Playlist-Generierung geeignet sind.
     """
     try:
-        cache_manager = get_cache_manager()
+        database_manager = get_database_manager()
         playlist_exporter = get_playlist_exporter()
         
         # Check which tracks are available
@@ -506,8 +543,8 @@ async def validate_tracks_for_playlist(track_paths: List[str]):
         track_data = []
         
         for track_path in track_paths:
-            if cache_manager.is_cached(track_path):
-                track = cache_manager.load_from_cache(track_path)
+            if database_manager.is_cached(track_path):
+                track = database_manager.load_from_cache(track_path)
                 if track:
                     available_tracks.append(track_path)
                     track_data.append(track)

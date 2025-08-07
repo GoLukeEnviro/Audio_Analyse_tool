@@ -341,7 +341,7 @@ class TracksQueryParams(BaseModel):
     genre: Optional[str] = Field(None, description="Filter by genre")
     search: Optional[str] = Field(None, description="Search in title/artist/filename")
     sort_by: Optional[str] = Field(default="filename", description="Sort field")
-    sort_order: Optional[str] = Field(default="asc", regex="^(asc|desc)$", description="Sort order")
+    sort_order: Optional[str] = Field(default="asc", pattern="^(asc|desc)$", description="Sort order")
     
     @validator('max_bpm')
     def validate_bmp_range(cls, v, values):

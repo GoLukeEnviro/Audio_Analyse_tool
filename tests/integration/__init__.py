@@ -1,0 +1,1 @@
+"""Integration tests for Project Phoenix backend components."""

@@ -231,14 +231,14 @@ class PlaylistExporter:
                     DiscNumber="1",
                     TrackNumber="1",
                     Year="",
-                    AverageBpm=f"{features.get('bmp', 120):.2f}",
+                    AverageBpm=f"{features.get('bpm', 120):.2f}",
                     DateCreated=datetime.now().strftime("%Y-%m-%d"),
                     BitRate="320",  # Default
                     SampleRate="44100",  # Default
                     Comments=f"Energy: {features.get('energy', 0):.2f}, Valence: {features.get('valence', 0):.2f}",
                     PlayCount="0",
                     Rating="0",
-                    Location=f"file://localhost/{track.get('file_path', '').replace('\\', '/')}"
+                    Location=f"file://localhost/{track.get('file_path', '').replace(chr(92), '/')}"
                 )
                 
                 # Tonart-Information falls verfügbar

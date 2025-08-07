@@ -1,52 +1,90 @@
-# DJ Audio-Analyse-Tool Pro - Dokumentation
+# DJ Audio-Analyse-Tool Pro Backend - Dokumentation
 
-Willkommen zur umfassenden Dokumentation des DJ Audio-Analyse-Tools Pro v2.0.
+Willkommen zur umfassenden Dokumentation des DJ Audio-Analyse-Tools Pro Backend API v2.0 - **Project Phoenix**.
+
+**🚀 Neue Architektur**: Dieses Tool wurde vollständig von einer monolithischen Desktop-Anwendung zu einem modernen headless FastAPI Backend transformiert.
 
 ## 📚 Dokumentations-Übersicht
 
-### Benutzer-Dokumentation
-- [Installation Guide](installation.md) - Schritt-für-Schritt Installationsanleitung
-- [Essentia Setup](essentia_setup.md) - Erweiterte Audio-Analyse mit Essentia
-- [User Guide](user-guide.md) - Vollständige Bedienungsanleitung
-- [Quick Start](quick-start.md) - Schnelleinstieg für neue Benutzer
-- [FAQ](faq.md) - Häufig gestellte Fragen
-- [Troubleshooting](troubleshooting.md) - Fehlerbehebung und Problemlösungen
+### API-Dokumentation
+- [FastAPI Reference](api/README.md) - Vollständige REST API-Dokumentation
+- [Quick Start Guide](quick-start.md) - API-Schnelleinstieg für neue Entwickler
+- [Installation Guide](installation.md) - Backend Setup und Deployment
+- [Authentication](api/authentication.md) - API-Authentifizierung
+- [Rate Limiting](api/rate-limiting.md) - API-Limits und Quotas
 
-### Entwickler-Dokumentation
-- [API Reference](api/README.md) - Vollständige API-Dokumentation
-- [Developer Guide](developer-guide.md) - Entwicklungsrichtlinien und Best Practices
-- [Architecture](architecture.md) - System-Architektur und Design-Entscheidungen
-- [Testing Guide](testing.md) - Test-Framework und Teststrategien
-- [Contributing](contributing.md) - Beitragsrichtlinien für Entwickler
+### Backend-Architektur
+- [System Architecture](architecture.md) - Microservice-Design und Komponenten
+- [Audio Analysis Engine](technical/audio-analysis.md) - librosa + Essentia Integration
+- [Background Tasks](technical/background-tasks.md) - Asynchrone Verarbeitung
+- [Cache Management](technical/cache-management.md) - Intelligente Zwischenspeicherung
+- [Database Schema](technical/database.md) - Datenmodelle und Persistierung
 
-### Technische Referenz
-- [Audio Analysis](technical/audio-analysis.md) - Audio-Analyse-Algorithmen
-- [Playlist Engine](technical/playlist-engine.md) - Playlist-Generierungs-Algorithmen
-- [Export Formats](technical/export-formats.md) - Unterstützte Export-Formate
-- [Configuration](technical/configuration.md) - Konfigurationsoptionen
+### Entwickler-Guides
+- [Developer Guide](developer-guide.md) - Backend-Entwicklung Best Practices
+- [Testing Guide](testing.md) - API Tests und Mocking
+- [Deployment Guide](deployment.md) - Docker, Kubernetes, Cloud
+- [Contributing](contributing.md) - Beitragsrichtlinien für Backend-Entwicklung
 
-### Tutorials
-- [Basic Workflow](tutorials/basic-workflow.md) - Grundlegender Arbeitsablauf
-- [Advanced Features](tutorials/advanced-features.md) - Erweiterte Funktionen
-- [Custom Presets](tutorials/custom-presets.md) - Eigene Presets erstellen
-- [Rekordbox Integration](tutorials/rekordbox-integration.md) - Integration mit Rekordbox
+### Features & Komponenten
+- [Playlist Engine API](technical/playlist-engine-api.md) - Intelligente Playlist-Generierung
+- [Mood Classification](technical/mood-classification.md) - Heuristik + ML-basierte Stimmungsanalyse  
+- [Export Formats](technical/export-formats.md) - Rekordbox, M3U, JSON, CSV Export
+- [Camelot Wheel](technical/camelot-wheel.md) - Harmonische Kompatibilität
+- [Batch Processing](technical/batch-processing.md) - Parallele Audio-Verarbeitung
 
-## 🚀 Schnellstart
+## 🚀 API-Schnellstart
 
-Für einen schnellen Einstieg empfehlen wir:
+Für einen schnellen Einstieg in die Backend-API empfehlen wir:
 
-1. **Neue Benutzer**: Beginnen Sie mit dem [Quick Start Guide](quick-start.md)
-2. **Entwickler**: Lesen Sie den [Developer Guide](developer-guide.md)
-3. **Probleme**: Schauen Sie in die [FAQ](faq.md) oder [Troubleshooting](troubleshooting.md)
+1. **Backend starten**: `uvicorn backend.main:app --reload`
+2. **API-Dokumentation**: [http://localhost:8000/docs](http://localhost:8000/docs) (Swagger UI)
+3. **Erste Audio-Analyse**: [Quick Start Guide](quick-start.md)
+4. **Entwickler**: Lesen Sie den [Developer Guide](developer-guide.md)
+5. **Probleme**: Schauen Sie in [Troubleshooting](troubleshooting.md)
+
+### Wichtige API-Endpunkte
+
+```bash
+# Server-Status prüfen
+GET /api/health
+
+# Audio-Analyse starten
+POST /api/analysis/start
+{
+  "directories": ["/path/to/music"]
+}
+
+# Playlist generieren
+POST /api/playlists/generate
+{
+  "preset": "progressive_house",
+  "target_duration": 3600
+}
+
+# Tracks abrufen
+GET /api/tracks?limit=50&bpm_min=120&bpm_max=130
+```
+
+## 🏗️ Architektur-Highlights
+
+- **FastAPI**: Moderne Python Web-Framework mit automatischer OpenAPI-Dokumentation
+- **Asynchrone Verarbeitung**: Background Tasks für lange Audio-Analysen
+- **Intelligente Cache**: JSON-basierte Persistierung mit MD5-Hashing
+- **Modulare Engine**: Separate Komponenten für Analyse, Playlist, Export
+- **Docker-Ready**: Containerisierte Deployment-Optionen
+- **Essentia + librosa**: Professionelle Audio-Feature-Extraktion
+- **RESTful Design**: Saubere API-Endpunkte für alle Funktionen
 
 ## 📖 Über diese Dokumentation
 
-Diese Dokumentation wird kontinuierlich aktualisiert und erweitert. Bei Fragen oder Verbesserungsvorschlägen erstellen Sie bitte ein Issue im Repository.
+Diese Dokumentation beschreibt die neue headless Backend-Architektur (Project Phoenix). Bei Fragen oder Verbesserungsvorschlägen erstellen Sie bitte ein Issue im Repository.
 
-**Version**: 2.0  
+**Version**: 2.0 (Phoenix Backend)  
+**Architektur**: FastAPI REST Backend  
 **Letzte Aktualisierung**: Januar 2025  
 **Sprache**: Deutsch
 
 ---
 
-*DJ Audio-Analyse-Tool Pro - Professionelle Audio-Analyse für DJs*
+*DJ Audio-Analyse-Tool Pro Backend - Headless Audio Analysis API for DJs*

@@ -15,7 +15,7 @@ from ..models import (
     CacheStatsResponse, SuccessResponse, ErrorResponse
 )
 from ...core_engine.audio_analysis.analyzer import AudioAnalyzer
-from ...core_engine.audio_analysis.cache_manager import CacheManager
+from ...core_engine.data_management.cache_manager import CacheManager # Korrigierter Import
 from ...core_engine.mood_classifier.mood_classifier import MoodClassifier
 from ...config.settings import settings
 
@@ -27,15 +27,11 @@ _analyzer = None
 _cache_manager = None
 _mood_classifier = None
 
-# Background task storage for analysis
-_active_analysis_tasks = {}
-
 
 def get_analyzer():
     """Get AudioAnalyzer instance"""
     global _analyzer
     if _analyzer is None:
-        from ...core_engine.audio_analysis.analyzer import AudioAnalyzer
         _analyzer = AudioAnalyzer(
             cache_dir=settings.get("audio_analysis.cache_dir"),
             enable_multiprocessing=settings.get("audio_analysis.enable_multiprocessing", True)
@@ -47,8 +43,7 @@ def get_cache_manager():
     """Get CacheManager instance"""
     global _cache_manager
     if _cache_manager is None:
-        from ...core_engine.audio_analysis.cache_manager import CacheManager
-        _cache_manager = CacheManager(settings.get("audio_analysis.cache_dir"))
+        _cache_manager = CacheManager(settings.get("audio_analysis.cache_dir")) # Korrigierter Import
     return _cache_manager
 
 
@@ -56,7 +51,6 @@ def get_mood_classifier():
     """Get MoodClassifier instance"""
     global _mood_classifier
     if _mood_classifier is None:
-        from ...core_engine.mood_classifier.mood_classifier import MoodClassifier
         _mood_classifier = MoodClassifier()
     return _mood_classifier
 
@@ -353,14 +347,15 @@ async def start_analysis(
             files_to_analyze = request.file_paths
             logger.info(f"Analyzing {len(files_to_analyze)} specific files")
         else:
-            # Scan directories
+            # Scan directories, use configured scan_path if no directories are provided
+            directories_to_scan = request.directories if request.directories else [settings.get("music_library.scan_path")]
             files_to_analyze = find_audio_files(
-                directories=request.directories,
+                directories=directories_to_scan,
                 recursive=request.recursive,
                 include_patterns=request.include_patterns,
                 exclude_patterns=request.exclude_patterns
             )
-            logger.info(f"Found {len(files_to_analyze)} audio files in {len(request.directories)} directories")
+            logger.info(f"Found {len(files_to_analyze)} audio files in {len(directories_to_scan)} directories")
         
         if not files_to_analyze:
             raise HTTPException(
@@ -585,7 +580,7 @@ async def get_supported_formats():
                 "common_formats": "MP3, AAC, M4A are well supported",
                 "avoid": "Very compressed or exotic formats may have reduced accuracy"
             },
-            "essentia_available": analyzer.use_essentia if hasattr(analyzer, 'use_essentia') else False
+            "essentia_available": analyzer.feature_extractor.use_essentia if hasattr(analyzer.feature_extractor, 'use_essentia') else False
         }
         
     except Exception as e:
@@ -659,7 +654,7 @@ async def get_analysis_stats():
                 if info.get('status') == AnalysisStatus.running
             ],
             "system_info": {
-                "essentia_available": analyzer.use_essentia if hasattr(analyzer, 'use_essentia') else False,
+                "essentia_available": analyzer.feature_extractor.use_essentia if hasattr(analyzer.feature_extractor, 'use_essentia') else False,
                 "multiprocessing_enabled": analyzer.enable_multiprocessing,
                 "max_workers": analyzer.max_workers,
                 "supported_formats_count": len(analyzer.get_supported_formats())
