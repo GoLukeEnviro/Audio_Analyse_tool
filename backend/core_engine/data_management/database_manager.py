@@ -81,25 +81,51 @@ class DatabaseManager:
         self.db_path = Path(db_path)
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
         
-        # Database connection settings
+        # MULTIPROCESSING FIX: Connection per thread/process
         self._connection = None
+        self._process_id = None  # Track which process owns the connection
         self._init_database()
         
         logger.info(f"DatabaseManager initialized with database: {self.db_path}")
     
     def _get_connection(self) -> sqlite3.Connection:
-        """Get database connection (singleton pattern)"""
-        if self._connection is None or self._connection.execute("SELECT 1").fetchone() is None:
+        """Get database connection with process isolation"""
+        import os
+        current_process = os.getpid()
+        
+        # MULTIPROCESSING FIX: Create new connection per process
+        if (self._connection is None or 
+            self._process_id != current_process or 
+            self._is_connection_broken()):
+            
+            # Close old connection if exists
+            if self._connection:
+                try:
+                    self._connection.close()
+                except:
+                    pass
+                    
+            # Create new process-local connection
             self._connection = sqlite3.connect(
                 self.db_path,
-                check_same_thread=False,
-                timeout=30.0
+                timeout=30.0,  # Removed check_same_thread=False
+                isolation_level='DEFERRED'  # Better for concurrency
             )
             self._connection.row_factory = sqlite3.Row
-            # Enable foreign keys
             self._connection.execute("PRAGMA foreign_keys = ON")
-            self._connection.execute("PRAGMA journal_mode = WAL")  # Better concurrency
+            self._connection.execute("PRAGMA journal_mode = WAL")
+            self._connection.execute("PRAGMA busy_timeout = 30000")  # 30s timeout
+            self._process_id = current_process
+            
         return self._connection
+    
+    def _is_connection_broken(self) -> bool:
+        """Check if connection is broken"""
+        try:
+            self._connection.execute("SELECT 1")
+            return False
+        except:
+            return True
     
     def _init_database(self):
         """Initialize database schema"""

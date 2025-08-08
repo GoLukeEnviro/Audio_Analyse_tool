@@ -24,6 +24,10 @@ audio_analysis:
     loudness: true
     spectral_centroid: true
     mfcc: true
+  
+  # Multiprocessing aktiviert mit prozess-sicheren DB-Verbindungen
+  enable_multiprocessing: true
+  max_workers: 3
 
 # Playlist-Generierung
 playlist:

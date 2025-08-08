@@ -2,7 +2,7 @@
   "name": "dj-analysis-frontend",
   "version": "1.0.0",
   "private": true,
-  "main": "src/main.tsx",
+  "main": "public/index.html",
   "dependencies": {
     "@emotion/react": "^11.11.4",
     "@emotion/styled": "^11.11.5",

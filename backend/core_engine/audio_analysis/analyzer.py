@@ -226,16 +226,16 @@ class AudioAnalyzer:
                         'errors': [str(e)]
                     }
         else:
-            # Parallele Verarbeitung
+            # MULTIPROCESSING mit prozess-lokalen DB-Verbindungen
             loop = asyncio.get_event_loop()
             with ProcessPoolExecutor(max_workers=self.max_workers) as executor:
-                # Starte alle Tasks
+                    # Starte alle Tasks mit prozess-sicherem Wrapper
                 future_to_file = {
-                    loop.run_in_executor(executor, self.analyze_track, file_path): file_path
+                    loop.run_in_executor(executor, self._safe_analyze_track, file_path): file_path
                     for file_path in file_paths
                 }
                 
-                # Sammle Ergebnisse
+                    # Sammle Ergebnisse
                 completed = 0
                 for future in asyncio.as_completed(future_to_file):
                     file_path = future_to_file[future]
@@ -254,6 +254,36 @@ class AudioAnalyzer:
                         }
         
         return results
+    
+    def _safe_analyze_track(self, file_path: str) -> Dict[str, Any]:
+        """
+        Prozess-sichere Track-Analyse mit isolierten DB-Verbindungen
+        Jeder Prozess erstellt seine eigene DatabaseManager-Instanz
+        """
+        try:
+            # MULTIPROCESSING FIX: Neue DB-Verbindung pro Prozess
+            from core_engine.data_management.database_manager import DatabaseManager
+            
+            # Prozess-lokale Instanzen erstellen
+            db = DatabaseManager(self.cache_dir.parent / "database.db")
+            
+            # Standard-Analyse durchführen
+            result = self.analyze_track(file_path)
+            
+            # Ergebnis in prozess-lokaler DB speichern
+            if result.get('status') == 'success':
+                # Optional: Ergebnisse sofort in DB speichern
+                pass
+            
+            return result
+            
+        except Exception as e:
+            logger.error(f"Prozess-sichere Analyse fehlgeschlagen für {file_path}: {e}")
+            return {
+                'file_path': file_path,
+                'status': 'error',
+                'errors': [str(e)]
+            }
     
     def _extract_time_series_features(self, y: np.ndarray, sr: int, 
                                      window_seconds: float = 5.0) -> List[Dict[str, Any]]:

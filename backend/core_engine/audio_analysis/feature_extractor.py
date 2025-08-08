@@ -107,16 +107,23 @@ class FeatureExtractor:
         return features
     
     def extract_tonal_features(self, y: np.ndarray, sr: int) -> Dict[str, Any]:
-        """Extrahiert tonale Features (Key, Harmonie, Chroma)"""
+        """Extrahiert tonale Features (Key, Harmonie, Chroma) mit robustem Array-Handling"""
         features = {}
         
         try:
-            # Chroma features
+            # ROBUST CHROMA FEATURES mit Array-Safety
             chroma = librosa.feature.chroma_stft(y=y, sr=sr)
-            chroma_mean = np.mean(chroma, axis=1)
             
-            features['chroma_mean'] = float(np.mean(chroma))
-            features['chroma_variance'] = float(np.var(chroma))
+            # Sichere Array-Validierung und Aggregation
+            if chroma.size == 0:
+                logger.warning("Empty chroma array, using fallback values")
+                chroma_mean = np.zeros(12)
+                features['chroma_mean'] = 0.0
+                features['chroma_variance'] = 0.0
+            else:
+                chroma_mean = np.mean(chroma, axis=1) if chroma.ndim > 1 else chroma
+                features['chroma_mean'] = float(np.mean(chroma))
+                features['chroma_variance'] = float(np.var(chroma))
             
             # Key detection (librosa-based)
             key_index = np.argmax(chroma_mean)
@@ -127,8 +134,9 @@ class FeatureExtractor:
             major_profile = np.array([6.35, 2.23, 3.48, 2.33, 4.38, 4.09, 2.52, 5.19, 2.39, 3.66, 2.29, 2.88])
             minor_profile = np.array([6.33, 2.68, 3.52, 5.38, 2.60, 3.53, 2.54, 4.75, 3.98, 2.69, 3.34, 3.17])
             
-            major_corr = np.corrcoef(chroma_mean, major_profile) if len(chroma_mean) == 12 else 0
-            minor_corr = np.corrcoef(chroma_mean, minor_profile) if len(chroma_mean) == 12 else 0
+            # FIX: corrcoef returns 2D matrix, need [0,1] element
+            major_corr = np.corrcoef(chroma_mean, major_profile)[0, 1] if len(chroma_mean) == 12 else 0
+            minor_corr = np.corrcoef(chroma_mean, minor_profile)[0, 1] if len(chroma_mean) == 12 else 0
             
             features['mode'] = 'major' if major_corr > minor_corr else 'minor'
             features['mode_confidence'] = float(abs(major_corr - minor_corr))
@@ -161,18 +169,28 @@ class FeatureExtractor:
         features = {}
         
         try:
-            # Spectral centroid
+            # ROBUST SPECTRAL CENTROID mit Array-Safety
             spectral_centroids = librosa.feature.spectral_centroid(y=y, sr=sr)
-            features['spectral_centroid'] = float(np.mean(spectral_centroids))
-            features['spectral_centroid_variance'] = float(np.var(spectral_centroids))
+            if spectral_centroids.size > 0:
+                features['spectral_centroid'] = float(np.mean(spectral_centroids))
+                features['spectral_centroid_variance'] = float(np.var(spectral_centroids))
+            else:
+                features['spectral_centroid'] = float(sr / 4)  # Fallback: quarter of Nyquist
+                features['spectral_centroid_variance'] = 0.0
             
-            # Spectral rolloff
+            # ROBUST SPECTRAL ROLLOFF 
             spectral_rolloff = librosa.feature.spectral_rolloff(y=y, sr=sr)
-            features['spectral_rolloff'] = float(np.mean(spectral_rolloff))
+            if spectral_rolloff.size > 0:
+                features['spectral_rolloff'] = float(np.mean(spectral_rolloff))
+            else:
+                features['spectral_rolloff'] = float(sr / 2)  # Fallback: Nyquist frequency
             
-            # Zero crossing rate
+            # ROBUST ZERO CROSSING RATE
             zcr = librosa.feature.zero_crossing_rate(y)
-            features['zero_crossing_rate'] = float(np.mean(zcr))
+            if zcr.size > 0:
+                features['zero_crossing_rate'] = float(np.mean(zcr))
+            else:
+                features['zero_crossing_rate'] = 0.0
             
             # Spectral bandwidth
             spectral_bandwidth = librosa.feature.spectral_bandwidth(y=y, sr=sr)
@@ -213,16 +231,29 @@ class FeatureExtractor:
         features = {}
         
         try:
-            # RMS Energy
+            # ROBUST RMS ENERGY mit Array-Safety  
             rms = librosa.feature.rms(y=y)
-            features['energy'] = float(np.mean(rms))
-            features['energy_variance'] = float(np.var(rms))
             
-            # Loudness approximation
-            features['loudness'] = float(librosa.amplitude_to_db(np.mean(rms)))
-            
-            # Dynamic range
-            features['dynamic_range'] = float(np.max(rms) - np.min(rms))
+            if rms.size == 0:
+                logger.warning("Empty RMS array, using fallback energy values")
+                features['energy'] = 0.0
+                features['energy_variance'] = 0.0
+                features['loudness'] = -60.0  # Silent fallback
+                features['dynamic_range'] = 0.0
+            else:
+                # Sichere Skalar-Konvertierung
+                features['energy'] = float(np.mean(rms))
+                features['energy_variance'] = float(np.var(rms))
+                
+                # Loudness mit Array-Validierung
+                rms_mean = np.mean(rms)
+                if rms_mean > 0:
+                    features['loudness'] = float(librosa.amplitude_to_db(rms_mean))
+                else:
+                    features['loudness'] = -60.0  # Silent fallback
+                
+                # Dynamic range mit Min/Max-Safety
+                features['dynamic_range'] = float(np.max(rms) - np.min(rms))
             
             # Essentia loudness features
             if self.use_essentia:
@@ -256,7 +287,8 @@ class FeatureExtractor:
             
             # Major/minor correlation for valence
             major_profile = np.array([6.35, 2.23, 3.48, 2.33, 4.38, 4.09, 2.52, 5.19, 2.39, 3.66, 2.29, 2.88])
-            major_corr = np.corrcoef(chroma_mean, major_profile) if len(chroma_mean) == 12 else 0.5
+            # FIX: corrcoef returns 2D matrix, need [0,1] element  
+            major_corr = np.corrcoef(chroma_mean, major_profile)[0, 1] if len(chroma_mean) == 12 else 0.5
             
             # RMS for energy component
             rms = librosa.feature.rms(y=y)
@@ -330,8 +362,9 @@ class FeatureExtractor:
             major_shifted = np.roll(major_template, i)
             minor_shifted = np.roll(minor_template, i)
             
-            major_corr = np.corrcoef(chroma_mean, major_shifted)
-            minor_corr = np.corrcoef(chroma_mean, minor_shifted)
+            # FIX: corrcoef returns 2D matrix, extract scalar correlation
+            major_corr = np.corrcoef(chroma_mean, major_shifted)[0, 1]
+            minor_corr = np.corrcoef(chroma_mean, minor_shifted)[0, 1]
             
             major_correlations.append(major_corr)
             minor_correlations.append(minor_corr)

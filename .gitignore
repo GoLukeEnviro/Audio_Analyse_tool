@@ -60,3 +60,6 @@ __pycache__/
 *.sw?
 .kilocode/audio_analyse_tool_requirements.md
 .kilocode/audio_analyse_tool_requirements.md
+CLAUDE.md
+data/database.db-wal
+data/database.db-shm
