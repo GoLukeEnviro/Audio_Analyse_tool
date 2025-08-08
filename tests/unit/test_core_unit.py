@@ -196,7 +196,7 @@ class TestMoodClassifier:
     def test_classifier_initialization(self, mood_classifier):
         """Test mood classifier initialization"""
         assert mood_classifier is not None
-        assert hasattr(mood_classifier, 'mood_categories')
+        assert hasattr(MoodClassifier, 'MOOD_CATEGORIES')
     
     def test_get_mood_categories(self, mood_classifier):
         """Test getting mood categories"""
