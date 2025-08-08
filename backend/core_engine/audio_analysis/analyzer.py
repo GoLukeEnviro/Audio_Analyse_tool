@@ -18,7 +18,14 @@ except ImportError:
     ESSENTIA_AVAILABLE = False
     print("[WARNUNG] Essentia-Modul nicht gefunden. Analyse läuft im librosa-Fallback-Modus.")
 
-import librosa
+try:
+    import librosa
+    LIBROSA_AVAILABLE = True
+    print("[INFO] Librosa module loaded successfully.")
+except ImportError:
+    LIBROSA_AVAILABLE = False
+    print("[WARNING] Could not import librosa. Some audio analysis features will be limited.")
+    raise ImportError("The librosa package is required for audio analysis. Please install it using 'pip install librosa'")
 import numpy as np
 from mutagen import File as MutagenFile
 from ..data_management.database_manager import DatabaseManager

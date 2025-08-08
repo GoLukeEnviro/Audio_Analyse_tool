@@ -122,6 +122,12 @@ class FeatureExtractor:
                 features['chroma_variance'] = 0.0
             else:
                 chroma_mean = np.mean(chroma, axis=1) if chroma.ndim > 1 else chroma
+                
+                # Sicherstellen, dass chroma_mean 12 Elemente hat, sonst mit Nullen auffüllen
+                if chroma_mean.shape[0] != 12:
+                    logger.warning(f"Chroma_mean hat {chroma_mean.shape[0]} Elemente, erwartet 12. Fülle mit Nullen auf.")
+                    chroma_mean = np.pad(chroma_mean, (0, 12 - chroma_mean.shape[0]), 'constant')
+                
                 features['chroma_mean'] = float(np.mean(chroma))
                 features['chroma_variance'] = float(np.var(chroma))
             
@@ -135,8 +141,13 @@ class FeatureExtractor:
             minor_profile = np.array([6.33, 2.68, 3.52, 5.38, 2.60, 3.53, 2.54, 4.75, 3.98, 2.69, 3.34, 3.17])
             
             # FIX: corrcoef returns 2D matrix, need [0,1] element
-            major_corr = np.corrcoef(chroma_mean, major_profile)[0, 1] if len(chroma_mean) == 12 else 0
-            minor_corr = np.corrcoef(chroma_mean, minor_profile)[0, 1] if len(chroma_mean) == 12 else 0
+            # Sicherstellen, dass chroma_mean 12 Elemente hat, sonst Korrelation auf 0 setzen
+            if chroma_mean.shape[0] == 12:
+                major_corr = np.corrcoef(chroma_mean, major_profile)[0, 1]
+                minor_corr = np.corrcoef(chroma_mean, minor_profile)[0, 1]
+            else:
+                major_corr = 0.0
+                minor_corr = 0.0
             
             features['mode'] = 'major' if major_corr > minor_corr else 'minor'
             features['mode_confidence'] = float(abs(major_corr - minor_corr))
@@ -347,7 +358,12 @@ class FeatureExtractor:
     def estimate_key(self, y: np.ndarray, sr: int) -> Tuple[str, str]:
         """Schätzt Tonart mit Krumhansl-Schmuckler Algorithmus"""
         chroma = librosa.feature.chroma_stft(y=y, sr=sr)
-        chroma_mean = np.mean(chroma, axis=1)
+        chroma_mean = np.mean(chroma, axis=1) if chroma.ndim > 1 else chroma
+        
+        # Sicherstellen, dass chroma_mean 12 Elemente hat, sonst mit Nullen auffüllen
+        if chroma_mean.shape[0] != 12:
+            logger.warning(f"Chroma_mean in estimate_key hat {chroma_mean.shape[0]} Elemente, erwartet 12. Fülle mit Nullen auf.")
+            chroma_mean = np.pad(chroma_mean, (0, 12 - chroma_mean.shape[0]), 'constant')
         
         # Key templates (Krumhansl-Schmuckler)
         major_template = np.array([6.35, 2.23, 3.48, 2.33, 4.38, 4.09, 2.52, 5.19, 2.39, 3.66, 2.29, 2.88])
@@ -363,8 +379,16 @@ class FeatureExtractor:
             minor_shifted = np.roll(minor_template, i)
             
             # FIX: corrcoef returns 2D matrix, extract scalar correlation
-            major_corr = np.corrcoef(chroma_mean, major_shifted)[0, 1]
-            minor_corr = np.corrcoef(chroma_mean, minor_shifted)[0, 1]
+            # Sicherstellen, dass chroma_mean und shifted_template nicht leer sind
+            if chroma_mean.size == 0 or major_shifted.size == 0:
+                major_corr = 0.0
+            else:
+                major_corr = np.corrcoef(chroma_mean, major_shifted)[0, 1]
+            
+            if chroma_mean.size == 0 or minor_shifted.size == 0:
+                minor_corr = 0.0
+            else:
+                minor_corr = np.corrcoef(chroma_mean, minor_shifted)[0, 1]
             
             major_correlations.append(major_corr)
             minor_correlations.append(minor_corr)
@@ -372,7 +396,11 @@ class FeatureExtractor:
         max_major_idx = np.argmax(major_correlations)
         max_minor_idx = np.argmax(minor_correlations)
         
-        if major_correlations[max_major_idx] > minor_correlations[max_minor_idx]:
+        # NaN-Werte in 0 umwandeln, um Vergleich zu ermöglichen
+        major_max_corr = np.nan_to_num(major_correlations[max_major_idx])
+        minor_max_corr = np.nan_to_num(minor_correlations[max_minor_idx])
+
+        if major_max_corr > minor_max_corr:
             key = key_names[max_major_idx]
         else:
             key = key_names[max_minor_idx] + 'm'

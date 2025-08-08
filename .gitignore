@@ -63,3 +63,9 @@ __pycache__/
 CLAUDE.md
 data/database.db-wal
 data/database.db-shm
+backend/data/database.db-wal
+backend/data/database.db
+backend/data/database.db-shm
+nul
+PROBLEM_FIXES_PLAN.md
+.kilocode/mcp.json
