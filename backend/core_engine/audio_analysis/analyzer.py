@@ -6,7 +6,7 @@ import logging
 import multiprocessing as mp
 from pathlib import Path
 from typing import Dict, List, Optional, Any, Tuple, Callable
-from concurrent.futures import ProcessPoolExecutor, as_completed
+from concurrent.futures import ThreadPoolExecutor, as_completed
 import hashlib
 import asyncio
 
@@ -28,11 +28,47 @@ except ImportError:
     raise ImportError("The librosa package is required for audio analysis. Please install it using 'pip install librosa'")
 import numpy as np
 from mutagen import File as MutagenFile
-from ..data_management.database_manager import DatabaseManager
+from ..data_management.database_manager import DatabaseManager, get_conn
 from .feature_extractor import FeatureExtractor
 from ..mood_classifier.mood_classifier import MoodClassifier # Neuer Import
 
 logger = logging.getLogger(__name__)
+
+DB_PATH = 'data/database.db'
+
+def db_insert_result(result: dict) -> None:
+    """Thread-sichere DB-Insertion für Analyse-Ergebnisse"""
+    if result.get('status') != 'success':
+        return
+    f = result.get('features', {})
+    c = result.get('camelot', {})
+    try:
+        with get_conn(DB_PATH) as conn:
+            cur = conn.cursor()
+            cur.execute(
+                """
+                INSERT INTO tracks (file_path, bpm, musical_key, energy, mood, camelot)
+                VALUES (?, ?, ?, ?, ?, ?)
+                ON CONFLICT(file_path) DO UPDATE SET
+                  bpm=excluded.bpm,
+                  musical_key=excluded.musical_key,
+                  energy=excluded.energy,
+                  mood=excluded.mood,
+                  camelot=excluded.camelot,
+                  updated_at=CURRENT_TIMESTAMP
+                """,
+                (
+                    result.get('file_path'),
+                    f.get('bpm', 0.0),
+                    c.get('key', ''),
+                    f.get('energy', 0.0),
+                    result.get('mood', {}).get('primary_mood', ''),
+                    c.get('camelot', '')
+                )
+            )
+            conn.commit()
+    except Exception as e:
+        logger.error(f"DB insert failed: {e}")
 
 
 class AudioAnalyzer:
@@ -213,6 +249,21 @@ class AudioAnalyzer:
         
         return result
     
+    def _analyze_track_safe(self, file_path: str) -> Dict[str, Any]:
+        """Thread-sichere Track-Analyse ohne SharedDB-Connection"""
+        try:
+            return self.analyze_track(file_path)
+        except Exception as e:
+            return {
+                'file_path': file_path,
+                'status': 'error',
+                'errors': [str(e)],
+                'features': {},
+                'metadata': {},
+                'camelot': {},
+                'mood': {}
+            }
+    
     async def analyze_batch_async(self, file_paths: List[str], 
                                  progress_callback: Optional[Callable] = None) -> Dict[str, Dict]:
         """Analysiert mehrere Dateien asynchron"""
@@ -233,64 +284,22 @@ class AudioAnalyzer:
                         'errors': [str(e)]
                     }
         else:
-            # MULTIPROCESSING mit prozess-lokalen DB-Verbindungen
-            loop = asyncio.get_event_loop()
-            with ProcessPoolExecutor(max_workers=self.max_workers) as executor:
-                    # Starte alle Tasks mit prozess-sicherem Wrapper
-                future_to_file = {
-                    loop.run_in_executor(executor, self._safe_analyze_track, file_path): file_path
-                    for file_path in file_paths
-                }
+            # ThreadPool für Thread-sichere DB-Operationen
+            with ThreadPoolExecutor(max_workers=self.max_workers) as executor:
+                futures = [executor.submit(self._analyze_track_safe, fp) for fp in file_paths]
+                batch_results = []
                 
-                    # Sammle Ergebnisse
-                completed = 0
-                for future in asyncio.as_completed(future_to_file):
-                    file_path = future_to_file[future]
-                    try:
-                        result = await future
-                        results[file_path] = result
-                        completed += 1
-                        if progress_callback:
-                            await progress_callback(completed, len(file_paths), file_path)
-                    except Exception as e:
-                        logger.error(f"Fehler bei {file_path}: {e}")
-                        results[file_path] = {
-                            'file_path': file_path,
-                            'status': 'error',
-                            'errors': [str(e)]
-                        }
+                # Sammle alle Ergebnisse
+                for fut in as_completed(futures):
+                    batch_results.append(fut.result())
+                
+                # DB-Schreiben NUR hier im Aufrufer (keine Connection in Threads teilen)  
+                for r in batch_results:
+                    db_insert_result(r)
+                    results[r.get('file_path', 'unknown')] = r
         
         return results
     
-    def _safe_analyze_track(self, file_path: str) -> Dict[str, Any]:
-        """
-        Prozess-sichere Track-Analyse mit isolierten DB-Verbindungen
-        Jeder Prozess erstellt seine eigene DatabaseManager-Instanz
-        """
-        try:
-            # MULTIPROCESSING FIX: Neue DB-Verbindung pro Prozess
-            from core_engine.data_management.database_manager import DatabaseManager
-            
-            # Prozess-lokale Instanzen erstellen
-            db = DatabaseManager(self.cache_dir.parent / "database.db")
-            
-            # Standard-Analyse durchführen
-            result = self.analyze_track(file_path)
-            
-            # Ergebnis in prozess-lokaler DB speichern
-            if result.get('status') == 'success':
-                # Optional: Ergebnisse sofort in DB speichern
-                pass
-            
-            return result
-            
-        except Exception as e:
-            logger.error(f"Prozess-sichere Analyse fehlgeschlagen für {file_path}: {e}")
-            return {
-                'file_path': file_path,
-                'status': 'error',
-                'errors': [str(e)]
-            }
     
     def _extract_time_series_features(self, y: np.ndarray, sr: int, 
                                      window_seconds: float = 5.0) -> List[Dict[str, Any]]:

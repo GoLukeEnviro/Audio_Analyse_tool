@@ -1,7 +1,17 @@
 {
   "permissions": {
     "allow": [
-      "Bash(npm install)"
+      "Bash(npm install)",
+      "Bash(python:*)",
+      "Bash(powershell:*)",
+      "Bash(.venvScriptsactivate)",
+      "Bash(set PYTHONUTF8=1)",
+      "Bash(set PYTHONIOENCODING=utf-8)",
+      "Bash(start /b python:*)",
+      "Bash(cmd /c:*)",
+      "Bash(ping:*)",
+      "Bash(start-dev.bat)",
+      "Bash(curl:*)"
     ],
     "deny": []
   }

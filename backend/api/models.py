@@ -114,10 +114,10 @@ class TrackSummary(BaseModel):
     artist: Optional[str] = None
     duration: float
     bpm: float
-    key: str
-    camelot: str
+    key: str = ''
+    camelot: str = ''
     energy: float
-    mood: Optional[MoodCategory] = None
+    mood: Optional[str] = None
     analyzed_at: float
 
 

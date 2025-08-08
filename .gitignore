@@ -69,3 +69,6 @@ backend/data/database.db-shm
 nul
 PROBLEM_FIXES_PLAN.md
 .kilocode/mcp.json
+.kilocode/mcp.json
+data/test_database.db
+data/inbox/test.wav

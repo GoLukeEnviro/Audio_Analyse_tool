@@ -12,8 +12,19 @@ from typing import Dict, List, Optional, Any, Tuple
 from datetime import datetime
 import hashlib
 from dataclasses import dataclass
+from contextlib import contextmanager
 
 logger = logging.getLogger(__name__)
+
+
+@contextmanager
+def get_conn(db_path: str):
+    """Thread-sichere DB-Connection für einzelne Operationen"""
+    conn = sqlite3.connect(db_path, check_same_thread=False, timeout=30.0)
+    try:
+        yield conn
+    finally:
+        conn.close()
 
 
 @dataclass

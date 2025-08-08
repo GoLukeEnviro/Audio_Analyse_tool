@@ -6,6 +6,8 @@ import { CssBaseline } from '@mui/material';
 import createCache from '@emotion/cache';
 import { CacheProvider } from '@emotion/react';
 
+import useHeartbeat from './hooks/useHeartbeat';
+
 import theme from './theme/theme';
 import { AppProps, defaultAppProps } from './types/interfaces';
 import AppLayout from './components/layout/AppLayout';
@@ -52,6 +54,8 @@ const queryClient = new QueryClient({
 
 const App: React.FC<AppProps> = (props = {}) => {
   const appProps = { ...defaultAppProps, ...props };
+
+  useHeartbeat(); // Rufe den Heartbeat-Hook auf
 
   return (
     <CacheProvider value={emotionCache}>

@@ -1,11 +1,18 @@
-"""FastAPI Backend für DJ Audio-Analyse-Tool Pro"""
+# -*- coding: utf-8 -*-
+import os
+os.environ.setdefault('PYTHONIOENCODING','utf-8')
+
+"""FastAPI Backend fuer DJ Audio-Analyse-Tool Pro"""
 
 import logging
 import sys
 from pathlib import Path
 from contextlib import asynccontextmanager
+import time
+import asyncio
+import signal
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.trustedhost import TrustedHostMiddleware
 from fastapi.responses import JSONResponse
@@ -16,7 +23,7 @@ backend_root = Path(__file__).parent
 sys.path.insert(0, str(backend_root))
 
 from config.settings import settings
-from api.endpoints import tracks, playlists, analysis
+from api.endpoints import tracks, playlists, analysis, config
 
 # Configure logging
 logging.basicConfig(
@@ -38,6 +45,8 @@ async def lifespan(app: FastAPI):
     """FastAPI lifespan events"""
     # Startup
     logger.info("[INFO] DJ Audio-Analyse-Tool Backend gestartet")
+    app.state.last_heartbeat = time.time()
+    asyncio.create_task(watchdog_task())
     logger.info(f"[INFO] Cache-Verzeichnis: {settings.get('audio_analysis.cache_dir')}")
     logger.info(f"[INFO] Preset-Verzeichnis: {settings.get('playlist_engine.presets_dir')}")
     logger.info(f"[INFO] Export-Verzeichnis: {settings.get('export.output_dir')}")
@@ -101,45 +110,38 @@ async def global_exception_handler(request, exc):
         )
 
 
-# Health check endpoint
+async def watchdog_task():
+    # DEV: entspannter Watchdog, kein Exit
+    timeout_s = int(os.getenv('WATCHDOG_TIMEOUT', '300'))
+    interval_s = int(os.getenv('WATCHDOG_INTERVAL', '5'))
+    logger.info(f"Watchdog-Task im Dev-Modus: {timeout_s}s timeout, {interval_s}s interval")
+    while True:
+        await asyncio.sleep(interval_s)
+        # nur warnen, NICHT beenden
+        logger.debug('Watchdog heartbeat check (dev mode); no shutdown')
+
+
+# Simple health endpoint
 @app.get("/health")
-async def health_check():
-    """Health check endpoint"""
+def health():
+    return {"status": "ok"}
+
+
+# WebSocket Heartbeat Endpoint
+@app.websocket("/ws/health")
+async def websocket_health_endpoint(websocket: WebSocket):
+    await websocket.accept()
+    logger.info("Frontend-Heartbeat-Verbindung hergestellt.")
     try:
-        # Test core components
-        from core_engine.audio_analysis.analyzer import AudioAnalyzer
-        from core_engine.playlist_engine.playlist_engine import PlaylistEngine
-        from core_engine.mood_classifier.mood_classifier import MoodClassifier
-        
-        analyzer = AudioAnalyzer()
-        playlist_engine = PlaylistEngine()
-        mood_classifier = MoodClassifier()
-        
-        return {
-            "status": "healthy",
-            "version": "2.0.0",
-            "timestamp": Path(__file__).stat().st_mtime,
-            "components": {
-                "audio_analyzer": "available",
-                "playlist_engine": f"{len(playlist_engine.get_all_presets())} presets loaded",
-                "mood_classifier": f"{len(mood_classifier.get_mood_categories())} mood categories",
-                "cache": "available"
-            },
-            "config": {
-                "debug": settings.is_development(),
-                "audio_formats": len(settings.get("audio_analysis.supported_formats", [])),
-                "export_formats": len(settings.get("export.supported_formats", []))
-            }
-        }
+        while True:
+            # Warte auf Nachrichten (Pings) vom Frontend
+            await websocket.receive_text()
+            # Aktualisiere den Zeitstempel des letzten Kontakts
+            app.state.last_heartbeat = time.time()
+    except WebSocketDisconnect:
+        logger.warning("Frontend-Heartbeat-Verbindung getrennt.")
     except Exception as e:
-        logger.error(f"Health check failed: {e}")
-        return JSONResponse(
-            status_code=503,
-            content={
-                "status": "unhealthy", 
-                "error": str(e)
-            }
-        )
+        logger.error(f"Fehler im Heartbeat-WebSocket: {e}")
 
 
 # API Status endpoint
@@ -188,17 +190,17 @@ async def root():
         "api_status": "/api/status",
         "endpoints": {
             "tracks": "/api/tracks",
-            "playlists": "/api/playlists", 
+            "playlists": "/api/playlists",
             "analysis": "/api/analysis"
         },
         "features": [
-            "🎵 Advanced audio analysis (BPM, key, energy, mood)",
-            "🎼 Intelligent playlist generation with multiple algorithms",
-            "🎯 Camelot Wheel harmonic mixing",
-            "📊 Mood classification with 8 categories",
-            "💾 Multiple export formats (M3U, JSON, CSV, Rekordbox XML)",
-            "⚡ Multiprocessing and caching for performance",
-            "🔄 Async operations for non-blocking API calls"
+            "[AUDIO] Advanced audio analysis (BPM, key, energy, mood)",
+            "[PLAYLIST] Intelligent playlist generation with multiple algorithms",
+            "[MIXING] Camelot Wheel harmonic mixing",
+            "[MOOD] Mood classification with 8 categories",
+            "[EXPORT] Multiple export formats (M3U, JSON, CSV, Rekordbox XML)",
+            "[PERFORMANCE] Multiprocessing and caching for performance",
+            "[ASYNC] Async operations for non-blocking API calls"
         ]
     }
 
@@ -207,6 +209,7 @@ async def root():
 app.include_router(tracks.router, prefix="/api/tracks", tags=["tracks"])
 app.include_router(playlists.router, prefix="/api/playlists", tags=["playlists"])
 app.include_router(analysis.router, prefix="/api/analysis", tags=["analysis"])
+app.include_router(config.router, prefix="/api/config", tags=["config"])
 
 
 def main():

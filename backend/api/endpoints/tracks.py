@@ -214,23 +214,27 @@ def sort_tracks(tracks: List[dict], sort_by: str, sort_order: str) -> List[dict]
 
 
 def track_to_summary(track_data: dict) -> TrackSummary:
-    """Convert track data to TrackSummary"""
+    """Convert track data to TrackSummary mit None-sicheren Defaults"""
     metadata = track_data.get('metadata', {})
     features = track_data.get('features', {})
     camelot = track_data.get('camelot', {})
     derived_metrics = track_data.get('derived_metrics', {})
     
+    # None-sichere Defaults für key/camelot
+    key = camelot.get('key') or ''
+    camelot_val = camelot.get('camelot') or ''
+    
     return TrackSummary(
         file_path=track_data.get('file_path', ''),
         filename=track_data.get('filename', ''),
-        title=metadata.get('title'),
-        artist=metadata.get('artist'),
+        title=metadata.get('title') or '',
+        artist=metadata.get('artist') or '',
         duration=metadata.get('duration', 0),
         bpm=features.get('bpm', 0),
-        key=camelot.get('key', ''),
-        camelot=camelot.get('camelot', ''),
+        key=key,
+        camelot=camelot_val,
         energy=features.get('energy', 0),
-        mood=derived_metrics.get('estimated_mood'),
+        mood=derived_metrics.get('estimated_mood') or '',
         analyzed_at=metadata.get('analyzed_at', 0)
     )
 
