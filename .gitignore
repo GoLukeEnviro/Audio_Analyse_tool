@@ -72,3 +72,10 @@ PROBLEM_FIXES_PLAN.md
 .kilocode/mcp.json
 data/test_database.db
 data/inbox/test.wav
+data/database.db.backup
+data/database.db.advanced_backup_1754660814
+data/database.db.advanced_backup_1754660780
+data/database.db
+test.db
+THREADING_FIX_DOCUMENTATION.md
+.trae/TODO.md

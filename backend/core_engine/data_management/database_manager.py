@@ -7,6 +7,7 @@ import json
 import sqlite3
 import logging
 import time
+import threading
 from pathlib import Path
 from typing import Dict, List, Optional, Any, Tuple
 from datetime import datetime
@@ -92,49 +93,46 @@ class DatabaseManager:
         self.db_path = Path(db_path)
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
         
-        # MULTIPROCESSING FIX: Connection per thread/process
-        self._connection = None
-        self._process_id = None  # Track which process owns the connection
+        # THREADING FIX: Thread-lokale Speicherung für Connections
+        self._local = threading.local()
         self._init_database()
         
         logger.info(f"DatabaseManager initialized with database: {self.db_path}")
     
     def _get_connection(self) -> sqlite3.Connection:
-        """Get database connection with process isolation"""
-        import os
-        current_process = os.getpid()
-        
-        # MULTIPROCESSING FIX: Create new connection per process
-        if (self._connection is None or 
-            self._process_id != current_process or 
-            self._is_connection_broken()):
-            
-            # Close old connection if exists
-            if self._connection:
+        """Get thread-lokale database connection"""
+        # Prüfe ob bereits eine Connection für diesen Thread existiert
+        if not hasattr(self._local, 'connection') or self._is_connection_broken():
+            # Schließe alte Connection falls vorhanden
+            if hasattr(self._local, 'connection') and self._local.connection:
                 try:
-                    self._connection.close()
+                    self._local.connection.close()
                 except:
                     pass
-                    
-            # Create new process-local connection
-            self._connection = sqlite3.connect(
-                self.db_path,
-                timeout=30.0,  # Removed check_same_thread=False
-                isolation_level='DEFERRED'  # Better for concurrency
-            )
-            self._connection.row_factory = sqlite3.Row
-            self._connection.execute("PRAGMA foreign_keys = ON")
-            self._connection.execute("PRAGMA journal_mode = WAL")
-            self._connection.execute("PRAGMA busy_timeout = 30000")  # 30s timeout
-            self._process_id = current_process
             
-        return self._connection
+            # Erstelle neue thread-lokale Connection
+            self._local.connection = sqlite3.connect(
+                self.db_path,
+                timeout=30.0,
+                isolation_level='DEFERRED',  # Bessere Concurrency
+                check_same_thread=False  # Erlaubt Connection-Sharing innerhalb des Threads
+            )
+            self._local.connection.row_factory = sqlite3.Row
+            self._local.connection.execute("PRAGMA foreign_keys = ON")
+            self._local.connection.execute("PRAGMA journal_mode = WAL")
+            self._local.connection.execute("PRAGMA busy_timeout = 30000")  # 30s timeout
+            
+            logger.debug(f"Created new thread-local DB connection for thread {threading.current_thread().ident}")
+            
+        return self._local.connection
     
     def _is_connection_broken(self) -> bool:
-        """Check if connection is broken"""
+        """Check if thread-local connection is broken"""
         try:
-            self._connection.execute("SELECT 1")
-            return False
+            if hasattr(self._local, 'connection') and self._local.connection:
+                self._local.connection.execute("SELECT 1")
+                return False
+            return True
         except:
             return True
     
@@ -405,46 +403,137 @@ class DatabaseManager:
     
     def is_cached(self, file_path: str) -> bool:
         """Check if track is already analyzed (replaces CacheManager.is_cached)"""
-        conn = self._get_connection()
-        cursor = conn.cursor()
-        
-        cursor.execute("""
-            SELECT t.id FROM tracks t
-            JOIN global_features gf ON t.id = gf.track_id
-            WHERE t.file_path = ?
-        """, (file_path,))
-        
-        return cursor.fetchone() is not None
+        try:
+            with get_conn(str(self.db_path)) as conn:
+                cursor = conn.cursor()
+                
+                cursor.execute("""
+                    SELECT t.id FROM tracks t
+                    JOIN global_features gf ON t.id = gf.track_id
+                    WHERE t.file_path = ?
+                """, (file_path,))
+                
+                return cursor.fetchone() is not None
+                
+        except Exception as e:
+            logger.error(f"Error checking cache: {e}")
+            return False
     
     def save_to_cache(self, file_path: str, analysis_result: Dict[str, Any]) -> bool:
         """Save analysis results (replaces CacheManager.save_to_cache)"""
+        # Use context manager for thread-safe database operations
         try:
-            # Add or get track
-            track_id = self.add_track(file_path, analysis_result.get('metadata', {}))
-            if not track_id:
-                return False
-            
-            # Update global features
-            if not self.update_global_features(track_id, analysis_result.get('features', {})):
-                return False
-            
-            # Add time series data if present
-            if 'time_series_features' in analysis_result:
-                if not self.add_time_series_data(track_id, analysis_result['time_series_features']):
-                    logger.warning(f"Failed to save time series data for {file_path}")
-            
-            return True
-            
+            conn = self._get_connection()
+            conn.row_factory = sqlite3.Row
+            cursor = conn.cursor()
+                
+                # Add or get track
+                try:
+                    cursor.execute("""
+                        INSERT INTO tracks (
+                            file_path, filename, title, artist, album, genre, year,
+                            duration, file_size, extension
+                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """, (
+                        file_path,
+                        analysis_result.get('metadata', {}).get('filename', os.path.basename(file_path)),
+                        analysis_result.get('metadata', {}).get('title'),
+                        analysis_result.get('metadata', {}).get('artist'),
+                        analysis_result.get('metadata', {}).get('album'),
+                        analysis_result.get('metadata', {}).get('genre'),
+                        analysis_result.get('metadata', {}).get('year'),
+                        analysis_result.get('metadata', {}).get('duration', 0.0),
+                        analysis_result.get('metadata', {}).get('file_size', 0),
+                        analysis_result.get('metadata', {}).get('extension', Path(file_path).suffix.lower())
+                    ))
+                    track_id = cursor.lastrowid
+                except sqlite3.IntegrityError:
+                    # Track already exists, get ID
+                    cursor.execute("SELECT id FROM tracks WHERE file_path = ?", (file_path,))
+                    result = cursor.fetchone()
+                    track_id = result[0] if result else None
+                
+                if not track_id:
+                    return False
+                
+                # Update global features
+                features = analysis_result.get('features', {})
+                mood_data = features.get('mood', {})
+                camelot_data = features.get('camelot', {}) or analysis_result.get('camelot', {})
+                derived_metrics = features.get('derived_metrics', {}) or analysis_result.get('derived_metrics', {})
+                
+                mood_scores_json = None
+                if 'mood' in features:
+                    if isinstance(features['mood'], dict) and 'scores' in features['mood']:
+                        mood_scores_json = json.dumps(features['mood']['scores'])
+                    elif isinstance(features['mood'], dict):
+                        mood_scores_json = json.dumps(features['mood'])
+                
+                cursor.execute("""
+                    INSERT OR REPLACE INTO global_features (
+                        track_id, bpm, key_name, camelot, key_confidence,
+                        energy, valence, danceability, loudness, spectral_centroid,
+                        zero_crossing_rate, mfcc_variance, primary_mood, mood_confidence,
+                        mood_scores, energy_level, bpm_category
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """, (
+                    track_id,
+                    features.get('bpm', 0.0),
+                    camelot_data.get('key'),
+                    camelot_data.get('camelot'),
+                    camelot_data.get('key_confidence'),
+                    features.get('energy', 0.0),
+                    features.get('valence', 0.0),
+                    features.get('danceability', 0.0),
+                    features.get('loudness'),
+                    features.get('spectral_centroid'),
+                    features.get('zero_crossing_rate'),
+                    features.get('mfcc_variance'),
+                    mood_data.get('primary_mood') if isinstance(mood_data, dict) else None,
+                    mood_data.get('confidence') if isinstance(mood_data, dict) else None,
+                    mood_scores_json,
+                    derived_metrics.get('energy_level') if isinstance(derived_metrics, dict) else None,
+                    derived_metrics.get('bpm_category') if isinstance(derived_metrics, dict) else None
+                ))
+                
+                # Add time series data if present
+                if 'time_series_features' in analysis_result:
+                    time_series_data = analysis_result['time_series_features']
+                    # Delete existing time series data for this track
+                    cursor.execute("DELETE FROM time_series_features WHERE track_id = ?", (track_id,))
+                    
+                    # Insert new time series data
+                    for data_point in time_series_data:
+                        cursor.execute("""
+                            INSERT INTO time_series_features (
+                                track_id, timestamp, energy_value, brightness_value,
+                                spectral_rolloff, rms_energy
+                            ) VALUES (?, ?, ?, ?, ?, ?)
+                        """, (
+                            track_id,
+                            data_point.get('timestamp', 0.0),
+                            data_point.get('energy_value'),
+                            data_point.get('brightness_value'),
+                            data_point.get('spectral_rolloff'),
+                            data_point.get('rms_energy')
+                        ))
+                
+                conn.commit()
+                return True
+                
         except Exception as e:
             logger.error(f"Error saving to database: {e}")
+            if conn:
+                conn.rollback()
             return False
     
     def load_from_cache(self, file_path: str) -> Optional[Dict[str, Any]]:
         """Load analysis results (replaces CacheManager.load_from_cache)"""
-        conn = self._get_connection()
-        cursor = conn.cursor()
-        
         try:
+            conn = self._get_connection()
+            cursor = conn.cursor()
+            conn.row_factory = sqlite3.Row
+            
             # Get track with global features
             cursor.execute("""
                 SELECT t.*, gf.*
@@ -457,46 +546,46 @@ class DatabaseManager:
             if not row:
                 return None
             
-            # Reconstruct analysis result format
+            # Reconstruct analysis result format with robust null handling
             result = {
-                'file_path': row['file_path'],
-                'filename': row['filename'],
+                'file_path': str(row['file_path']) if row['file_path'] else file_path,
+                'filename': str(row['filename']) if row['filename'] else os.path.basename(file_path),
                 'features': {
-                    'bpm': row['bpm'],
-                    'energy': row['energy'],
-                    'valence': row['valence'],
-                    'danceability': row['danceability'],
-                    'loudness': row['loudness'],
-                    'spectral_centroid': row['spectral_centroid'],
-                    'zero_crossing_rate': row['zero_crossing_rate'],
-                    'mfcc_variance': row['mfcc_variance'],
+                    'bpm': float(row['bpm']) if row['bpm'] is not None else 0.0,
+                    'energy': float(row['energy']) if row['energy'] is not None else 0.0,
+                    'valence': float(row['valence']) if row['valence'] is not None else 0.0,
+                    'danceability': float(row['danceability']) if row['danceability'] is not None else 0.0,
+                    'loudness': float(row['loudness']) if row['loudness'] is not None else 0.0,
+                    'spectral_centroid': float(row['spectral_centroid']) if row['spectral_centroid'] is not None else 0.0,
+                    'zero_crossing_rate': float(row['zero_crossing_rate']) if row['zero_crossing_rate'] is not None else 0.0,
+                    'mfcc_variance': float(row['mfcc_variance']) if row['mfcc_variance'] is not None else 0.0,
                 },
                 'metadata': {
-                    'title': row['title'],
-                    'artist': row['artist'],
-                    'album': row['album'],
-                    'genre': row['genre'],
-                    'year': row['year'],
-                    'duration': row['duration'],
-                    'file_size': row['file_size'],
-                    'filename': row['filename'],
-                    'file_path': row['file_path'],
-                    'extension': row['extension'],
-                    'analyzed_at': row['analyzed_at']
+                    'title': str(row['title']) if row['title'] else '',
+                    'artist': str(row['artist']) if row['artist'] else '',
+                    'album': str(row['album']) if row['album'] else '',
+                    'genre': str(row['genre']) if row['genre'] else '',
+                    'year': str(row['year']) if row['year'] else '',
+                    'duration': float(row['duration']) if row['duration'] is not None else 0.0,
+                    'file_size': int(row['file_size']) if row['file_size'] is not None else 0,
+                    'filename': str(row['filename']) if row['filename'] else os.path.basename(file_path),
+                    'file_path': str(row['file_path']) if row['file_path'] else file_path,
+                    'extension': str(row['extension']) if row['extension'] else '',
+                    'analyzed_at': str(row['updated_at']) if row['updated_at'] else str(time.time())
                 },
                 'camelot': {
-                    'key': row['key_name'],
-                    'camelot': row['camelot'],
-                    'key_confidence': row['key_confidence']
+                    'key': str(row['key_name']) if row['key_name'] else '',
+                    'camelot': str(row['camelot']) if row['camelot'] else '',
+                    'key_confidence': float(row['key_confidence']) if row['key_confidence'] is not None else 0.0
                 },
                 'mood': {
-                    'primary_mood': row['primary_mood'] if row['primary_mood'] else None,
-                    'confidence': row['mood_confidence'] if row['mood_confidence'] else None,
+                    'primary_mood': str(row['primary_mood']) if row['primary_mood'] else '',
+                    'confidence': float(row['mood_confidence']) if row['mood_confidence'] is not None else 0.0,
                     'scores': json.loads(row['mood_scores']) if row['mood_scores'] else {}
                 },
                 'derived_metrics': {
-                    'energy_level': row['energy_level'],
-                    'bpm_category': row['bpm_category']
+                    'energy_level': str(row['energy_level']) if row['energy_level'] else '',
+                    'bpm_category': str(row['bpm_category']) if row['bpm_category'] else ''
                 },
                 'status': 'completed',
                 'version': '2.0',
@@ -504,15 +593,22 @@ class DatabaseManager:
             }
             
             # Add time series data if requested
-            time_series_data = self.get_time_series_data(row['id'])
+            cursor.execute("""
+                SELECT timestamp, energy_value, brightness_value, spectral_rolloff, rms_energy
+                FROM time_series_features
+                WHERE track_id = ?
+                ORDER BY timestamp
+            """, (row['id'],))
+            
+            time_series_data = cursor.fetchall()
             if time_series_data:
                 result['time_series_features'] = [
                     {
-                        'timestamp': ts.timestamp,
-                        'energy_value': ts.energy_value,
-                        'brightness_value': ts.brightness_value,
-                        'spectral_rolloff': ts.spectral_rolloff,
-                        'rms_energy': ts.rms_energy
+                        'timestamp': ts['timestamp'],
+                        'energy_value': ts['energy_value'],
+                        'brightness_value': ts['brightness_value'],
+                        'spectral_rolloff': ts['spectral_rolloff'],
+                        'rms_energy': ts['rms_energy']
                     }
                     for ts in time_series_data
                 ]
@@ -726,16 +822,23 @@ class DatabaseManager:
             logger.error(f"Error during cleanup: {e}")
             return {'removed_files': 0, 'freed_mb': 0.0}
     
+    def close_thread_connection(self):
+        """Close thread-local database connection"""
+        if hasattr(self._local, 'connection') and self._local.connection:
+            try:
+                self._local.connection.close()
+                self._local.connection = None
+                logger.debug(f"Thread-local DB connection closed for thread {threading.current_thread().ident}")
+            except Exception as e:
+                logger.warning(f"Error closing thread-local connection: {e}")
+    
     def close(self):
-        """Close database connection"""
-        if self._connection:
-            self._connection.close()
-            self._connection = None
-            logger.debug("Database connection closed")
+        """Close database connection (legacy method for compatibility)"""
+        self.close_thread_connection()
     
     def __del__(self):
         """Cleanup on destruction"""
         try:
-            self.close()
+            self.close_thread_connection()
         except:
             pass

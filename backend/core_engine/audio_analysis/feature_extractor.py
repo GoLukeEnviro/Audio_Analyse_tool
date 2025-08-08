@@ -10,6 +10,99 @@ from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
+def get_safe_defaults() -> Dict[str, Any]:
+    """Sichere Default-Werte für Feature-Extraktion"""
+    return {
+        'bpm': 120.0,
+        'key': 'Unknown',
+        'camelot': '1A',
+        'key_confidence': 0.0,
+        'energy': 0.5,
+        'valence': 0.5,
+        'danceability': 0.5,
+        'acousticness': 0.5,
+        'instrumentalness': 0.5,
+        'loudness': -20.0,
+        'spectral_centroid': 2000.0,
+        'zero_crossing_rate': 0.1,
+        'mfcc_variance': 0.5,
+        'tempo_confidence': 0.0,
+        'rhythm_strength': 0.5
+    }
+
+def get_fallback_analysis(file_path: str = "unknown") -> Dict[str, Any]:
+    """Vollständige Fallback-Analyse für fehlgeschlagene Dateien"""
+    import time
+    return {
+        'file_path': file_path,
+        'filename': os.path.basename(file_path) if file_path != "unknown" else "unknown",
+        'features': get_safe_defaults(),
+        'metadata': {
+            'title': 'Unknown',
+            'artist': 'Unknown Artist',
+            'album': 'Unknown',
+            'duration': 180.0,
+            'file_size': 0,
+            'format': 'unknown',
+            'analyzed_at': time.time()
+        },
+        'camelot': {
+            'key': 'Unknown',
+            'camelot': '1A',
+            'key_confidence': 0.0,
+            'compatible_keys': ['1A', '12A', '2A']
+        },
+        'mood': {
+            'primary_mood': 'neutral',
+            'confidence': 0.0,
+            'scores': {
+                'energetic': 0.0,
+                'happy': 0.0,
+                'calm': 0.0,
+                'melancholic': 0.0,
+                'aggressive': 0.0,
+                'neutral': 1.0
+            }
+        },
+        'derived_metrics': {
+            'energy_level': 'medium',
+            'bpm_category': 'medium',
+            'estimated_mood': 'neutral',
+            'danceability_level': 'medium'
+        },
+        'status': 'fallback',
+        'errors': ['Analysis failed - using fallback values'],
+        'version': '2.0'
+    }
+
+def safe_analyze_audio_file(file_path: str) -> Dict[str, Any]:
+    """Ultimativ sichere Audio-Analyse mit Fallback"""
+    import time
+    
+    # File validation
+    if not Path(file_path).is_file():
+        logger.error(f"File not found: {file_path}")
+        return get_fallback_analysis(file_path)
+    
+    # Size check
+    try:
+        file_size = os.path.getsize(file_path)
+        if file_size < 1024:  # Less than 1KB
+            logger.error(f"File too small: {file_path} ({file_size} bytes)")
+            return get_fallback_analysis(file_path)
+    except OSError as e:
+        logger.error(f"Cannot access file {file_path}: {e}")
+        return get_fallback_analysis(file_path)
+    
+    # Try full analysis
+    try:
+        # This will be implemented by AudioAnalyzer.analyze_track()
+        logger.debug(f"Starting safe analysis for: {file_path}")
+        return None  # Placeholder - will be replaced by caller
+    except Exception as e:
+        logger.error(f"Safe analysis failed for {file_path}: {e}")
+        return get_fallback_analysis(file_path)
+
 # Optionales Essentia-Import
 try:
     import essentia
@@ -336,29 +429,60 @@ class FeatureExtractor:
         return features
     
     def extract_all_features(self, y: np.ndarray, sr: int) -> Dict[str, Any]:
-        """Extrahiert alle verfügbaren Features"""
-        all_features = {}
+        """Extrahiert alle verfügbaren Features mit Fehlerbehandlung"""
+        all_features = get_safe_defaults()
         
-        # Extract different feature categories
-        rhythm_features = self.extract_rhythm_features(y, sr)
-        tonal_features = self.extract_tonal_features(y, sr)
-        spectral_features = self.extract_spectral_features(y, sr)
-        energy_features = self.extract_energy_features(y, sr)
-        perceptual_features = self.extract_perceptual_features(y, sr)
-        
-        # Combine all features
-        all_features.update(rhythm_features)
-        all_features.update(tonal_features)
-        all_features.update(spectral_features)
-        all_features.update(energy_features)
-        all_features.update(perceptual_features)
-        
+        try:
+            # Extract different feature categories with individual error handling
+            try:
+                rhythm_features = self.extract_rhythm_features(y, sr)
+                all_features.update(rhythm_features)
+                logger.debug("Rhythm features extracted successfully")
+            except Exception as e:
+                logger.warning(f"Rhythm feature extraction failed: {e}")
+            
+            try:
+                tonal_features = self.extract_tonal_features(y, sr)
+                all_features.update(tonal_features)
+                logger.debug("Tonal features extracted successfully")
+            except Exception as e:
+                logger.warning(f"Tonal feature extraction failed: {e}")
+            
+            try:
+                spectral_features = self.extract_spectral_features(y, sr)
+                all_features.update(spectral_features)
+                logger.debug("Spectral features extracted successfully")
+            except Exception as e:
+                logger.warning(f"Spectral feature extraction failed: {e}")
+            
+            try:
+                energy_features = self.extract_energy_features(y, sr)
+                all_features.update(energy_features)
+                logger.debug("Energy features extracted successfully")
+            except Exception as e:
+                logger.warning(f"Energy feature extraction failed: {e}")
+            
+            try:
+                perceptual_features = self.extract_perceptual_features(y, sr)
+                all_features.update(perceptual_features)
+                logger.debug("Perceptual features extracted successfully")
+            except Exception as e:
+                logger.warning(f"Perceptual feature extraction failed: {e}")
+                
+        except Exception as e:
+            logger.error(f"Critical error in feature extraction: {e}")
+            # Return safe defaults if everything fails
+            
         return all_features
 
     def estimate_key(self, y: np.ndarray, sr: int) -> Tuple[str, str]:
-        """Schätzt Tonart mit Krumhansl-Schmuckler Algorithmus"""
-        chroma = librosa.feature.chroma_stft(y=y, sr=sr)
-        chroma_mean = np.mean(chroma, axis=1) if chroma.ndim > 1 else chroma
+        """Schätzt Tonart mit Krumhansl-Schmuckler Algorithmus - robust gegen Fehler"""
+        try:
+            chroma = librosa.feature.chroma_stft(y=y, sr=sr)
+            chroma_mean = np.mean(chroma, axis=1) if chroma.ndim > 1 else chroma
+        except Exception as e:
+            logger.warning(f"Key estimation failed: {e}")
+            return 'Unknown', '1A'
         
         # Sicherstellen, dass chroma_mean 12 Elemente hat, sonst mit Nullen auffüllen
         if chroma_mean.shape[0] != 12:

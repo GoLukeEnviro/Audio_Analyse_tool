@@ -11,7 +11,8 @@
       "Bash(cmd /c:*)",
       "Bash(ping:*)",
       "Bash(start-dev.bat)",
-      "Bash(curl:*)"
+      "Bash(curl:*)",
+      "Bash(mkdir:*)"
     ],
     "deny": []
   }

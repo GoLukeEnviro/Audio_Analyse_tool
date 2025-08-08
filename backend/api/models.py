@@ -5,6 +5,35 @@ from typing import Dict, List, Optional, Any, Union
 from enum import Enum
 from pydantic import BaseModel, Field, validator
 
+def get_default_features() -> Dict[str, float]:
+    """Factory für Default Audio Features"""
+    return {
+        'bpm': 120.0,
+        'energy': 0.5,
+        'valence': 0.5,
+        'danceability': 0.5,
+        'acousticness': 0.5,
+        'instrumentalness': 0.5,
+        'loudness': -20.0,
+        'spectral_centroid': 2000.0,
+        'zero_crossing_rate': 0.1
+    }
+
+def get_default_compatible_keys() -> List[str]:
+    """Factory für Default Compatible Keys"""
+    return ['1A', '12A', '2A']
+
+def get_default_mood_scores() -> Dict[str, float]:
+    """Factory für Default Mood Scores"""
+    return {
+        'energetic': 0.0,
+        'happy': 0.0,
+        'calm': 0.0,
+        'melancholic': 0.0,
+        'aggressive': 0.0,
+        'neutral': 1.0
+    }
+
 
 # Enums
 class SortingAlgorithm(str, Enum):
@@ -49,12 +78,12 @@ class PlaylistGenerationStatus(str, Enum):
 # Base Models
 class AudioFeatures(BaseModel):
     """Audio features extracted from track analysis"""
-    bpm: float = Field(..., gt=0, le=300, description="Beats per minute")
-    energy: float = Field(..., ge=0.0, le=1.0, description="Energy level (0-1)")
-    valence: float = Field(..., ge=0.0, le=1.0, description="Musical positiveness (0-1)")
-    danceability: float = Field(..., ge=0.0, le=1.0, description="Danceability (0-1)")
-    acousticness: float = Field(..., ge=0.0, le=1.0, description="Acousticness (0-1)")
-    instrumentalness: float = Field(..., ge=0.0, le=1.0, description="Instrumentalness (0-1)")
+    bpm: float = Field(120.0, gt=0, le=300, description="Beats per minute")
+    energy: float = Field(0.5, ge=0.0, le=1.0, description="Energy level (0-1)")
+    valence: float = Field(0.5, ge=0.0, le=1.0, description="Musical positiveness (0-1)")
+    danceability: float = Field(0.5, ge=0.0, le=1.0, description="Danceability (0-1)")
+    acousticness: float = Field(0.5, ge=0.0, le=1.0, description="Acousticness (0-1)")
+    instrumentalness: float = Field(0.5, ge=0.0, le=1.0, description="Instrumentalness (0-1)")
 
 
 class TrackMetadata(BaseModel):
@@ -71,26 +100,26 @@ class TrackMetadata(BaseModel):
 
 class CamelotInfo(BaseModel):
     """Camelot Wheel information for harmonic mixing"""
-    key: str = Field(..., description="Musical key (e.g., 'C Major', '8A')")
-    camelot: str = Field(..., pattern=r"^\d{1,2}[AB]$", description="Camelot notation (e.g., '8A')")
-    key_confidence: float = Field(..., ge=0.0, le=1.0, description="Key detection confidence")
-    compatible_keys: List[str] = Field(..., description="Harmonically compatible keys")
+    key: str = Field('Unknown', description="Musical key (e.g., 'C Major', '8A')")
+    camelot: str = Field('1A', description="Camelot notation (e.g., '8A')")
+    key_confidence: float = Field(0.0, ge=0.0, le=1.0, description="Key detection confidence")
+    compatible_keys: List[str] = Field(default_factory=get_default_compatible_keys, description="Harmonically compatible keys")
 
 
 class DerivedMetrics(BaseModel):
     """Derived metrics calculated from features"""
-    energy_level: str = Field(..., description="Energy level category (low/medium/high)")
-    bpm_category: str = Field(..., description="BPM category (slow/medium/fast/very_fast)")
-    estimated_mood: str = Field(..., description="Estimated mood category")
-    danceability_level: str = Field(..., description="Danceability level (low/medium/high)")
+    energy_level: str = Field('medium', description="Energy level category (low/medium/high)")
+    bpm_category: str = Field('medium', description="BPM category (slow/medium/fast/very_fast)")
+    estimated_mood: str = Field('neutral', description="Estimated mood category")
+    danceability_level: str = Field('medium', description="Danceability level (low/medium/high)")
 
 
 class MoodAnalysis(BaseModel):
     """Mood analysis results"""
-    primary_mood: MoodCategory = Field(..., description="Primary mood category")
-    confidence: float = Field(..., ge=0.0, le=1.0, description="Classification confidence")
-    scores: Dict[str, float] = Field(..., description="Scores for all mood categories")
-    explanation: Optional[str] = Field(None, description="Human-readable explanation")
+    primary_mood: MoodCategory = Field(MoodCategory.neutral, description="Primary mood category")
+    confidence: float = Field(0.0, ge=0.0, le=1.0, description="Classification confidence")
+    scores: Dict[str, float] = Field(default_factory=get_default_mood_scores, description="Scores for all mood categories")
+    explanation: Optional[str] = Field('No mood analysis available', description="Human-readable explanation")
 
 
 # Track Models

@@ -17,9 +17,9 @@ from fastapi.testclient import TestClient
 from httpx import AsyncClient
 
 # Import backend components
-# import sys
-# project_root = Path(__file__).parent.parent
-# sys.path.insert(0, str(project_root))
+import sys
+project_root = Path(__file__).parent.parent
+sys.path.insert(0, str(project_root))
 
 # Import backend components (conditional for testing)
 try:

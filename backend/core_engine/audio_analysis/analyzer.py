@@ -164,11 +164,20 @@ class AudioAnalyzer:
             return False
     
     def analyze_track(self, file_path: str) -> Dict[str, Any]:
-        """Analysiert einen Audio-Track komplett"""
+        """Analysiert einen Audio-Track komplett - mit ultimativer Fehlerbehandlung"""
         # Check cache first
         cached = self.load_cached_analysis(file_path)
         if cached:
             return cached
+        
+        # Ultra-safe file validation
+        from .feature_extractor import safe_analyze_audio_file, get_fallback_analysis
+        
+        pre_check = safe_analyze_audio_file(file_path)
+        if pre_check and pre_check.get('status') == 'fallback':
+            # File validation failed
+            logger.warning(f"Pre-check failed for {file_path}, using fallback")
+            return pre_check
         
         result = {
             'file_path': file_path,
@@ -242,10 +251,18 @@ class AudioAnalyzer:
             
         except Exception as e:
             error_msg = f"Fehler bei der Analyse von {file_path}: {str(e)}"
-            result['errors'].append(error_msg)
-            result['status'] = 'error'
-            logger.error(error_msg)
+            logger.error(error_msg, exc_info=True)
             self.analysis_stats['errors'] += 1
+            
+            # Return comprehensive fallback instead of broken result
+            from .feature_extractor import get_fallback_analysis
+            fallback_result = get_fallback_analysis(file_path)
+            fallback_result['errors'] = [error_msg]
+            fallback_result['status'] = 'error_fallback'
+            
+            # Still save fallback to avoid reprocessing
+            self.save_analysis_results(file_path, fallback_result)
+            return fallback_result
         
         return result
     

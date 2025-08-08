@@ -4,9 +4,6 @@ from pathlib import Path
 from unittest.mock import patch, MagicMock
 
 # Import the function to be tested
-# import sys
-# project_root = Path(__file__).parent.parent
-# sys.path.insert(0, str(project_root))
 
 from backend.api.endpoints.analysis import find_audio_files
 from config.settings import settings

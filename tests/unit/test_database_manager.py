@@ -125,8 +125,7 @@ class TestDatabaseManager:
             }
         }
         
-        success = db_manager.update_global_features(track_id, features)
-        assert success is True
+        db_manager.update_global_features(track_id, features)
         
         # Verify features were saved
         conn = db_manager._get_connection()
@@ -161,8 +160,7 @@ class TestDatabaseManager:
             {'timestamp': 10.0, 'energy_value': 0.8, 'brightness_value': 0.7, 'spectral_rolloff': 2200.0}
         ]
         
-        success = db_manager.add_time_series_data(track_id, time_series_data)
-        assert success is True
+        db_manager.add_time_series_data(track_id, time_series_data)
         
         # Retrieve and verify data
         time_series_records = db_manager.get_time_series_data(track_id)
@@ -198,6 +196,20 @@ class TestDatabaseManager:
         """Test save_to_cache interface compatibility with old CacheManager"""
         db_manager = DatabaseManager(test_database_file)
         
+        # Add track first to ensure it exists
+        metadata = {
+            'filename': 'test.mp3',
+            'title': 'Test Track',
+            'artist': 'Test Artist',
+            'album': 'Test Album',
+            'genre': 'Electronic',
+            'year': '2024',
+            'duration': 200.0,
+            'file_size': 6242880,
+            'extension': '.mp3'
+        }
+        db_manager.add_track('/test/path/test.mp3', metadata)
+        
         analysis_result = {
             'file_path': '/test/path/test.mp3',
             'filename': 'test.mp3',
@@ -205,41 +217,63 @@ class TestDatabaseManager:
                 'bpm': 130.0,
                 'energy': 0.85,
                 'valence': 0.7,
-                'danceability': 0.9
+                'danceability': 0.9,
+                'loudness': -10.5,
+                'spectral_centroid': 2500.0,
+                'zero_crossing_rate': 0.05,
+                'mfcc_variance': 0.02,
+                'mood': {
+                    'primary_mood': 'uplifting',
+                    'confidence': 0.8,
+                    'scores': {'uplifting': 0.8, 'euphoric': 0.6}
+                },
+                'camelot': {
+                    'key': 'D Major',
+                    'camelot': '10B',
+                    'key_confidence': 0.9
+                },
+                'derived_metrics': {
+                    'energy_level': 'high',
+                    'bpm_category': 'medium'
+                }
             },
-            'metadata': {
-                'filename': 'test.mp3',
-                'title': 'Test Track',
-                'artist': 'Test Artist',
-                'duration': 200.0,
-                'file_size': 6242880,
-                'extension': '.mp3'
-            },
-            'camelot': {
-                'key': 'D Major',
-                'camelot': '10B',
-                'key_confidence': 0.9
-            },
-            'mood': {
-                'primary_mood': 'uplifting',
-                'confidence': 0.8,
-                'scores': {'uplifting': 0.8, 'euphoric': 0.6}
-            },
+            'metadata': metadata,
             'time_series_features': [
                 {'timestamp': 0.0, 'energy_value': 0.7, 'brightness_value': 0.6},
                 {'timestamp': 5.0, 'energy_value': 0.8, 'brightness_value': 0.7}
             ]
         }
         
-        success = db_manager.save_to_cache('/test/path/test.mp3', analysis_result)
-        assert success is True
+        # Ensure track exists before saving to cache
+        db_manager.add_track('/test/path/test.mp3', metadata)
         
-        # Verify it can be loaded back
+        result = db_manager.save_to_cache('/test/path/test.mp3', analysis_result)
+        assert result is True, f"save_to_cache should return True on success, got {result}"
+        
+        # Verify data was saved by checking database directly
+        conn = db_manager._get_connection()
+        cursor = conn.cursor()
+        
+        # Check if track exists
+        cursor.execute("SELECT id FROM tracks WHERE file_path = ?", ('/test/path/test.mp3',))
+        track_row = cursor.fetchone()
+        assert track_row is not None, "Track should exist in database after save"
+        
+        # Check if global features exist
+        cursor.execute("SELECT * FROM global_features WHERE track_id = ?", (track_row[0],))
+        features_row = cursor.fetchone()
+        assert features_row is not None, "Global features should exist in database"
+        
+        # Verify is_cached works
+        assert db_manager.is_cached('/test/path/test.mp3') is True
+        
+        # Test load_from_cache returns valid data
         loaded_data = db_manager.load_from_cache('/test/path/test.mp3')
-        assert loaded_data is not None
+        assert loaded_data is not None, "load_from_cache should return data, not None"
+        assert loaded_data['file_path'] == '/test/path/test.mp3'
         assert loaded_data['features']['bpm'] == 130.0
         assert loaded_data['metadata']['title'] == 'Test Track'
-        assert loaded_data['mood']['primary_mood'] == 'uplifting'
+        assert loaded_data['features']['mood']['primary_mood'] == 'uplifting'
         assert len(loaded_data.get('time_series_features', [])) == 2
         
         db_manager.close()

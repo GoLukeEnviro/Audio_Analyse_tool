@@ -63,9 +63,10 @@ class PlaylistPreset:
 class PlaylistEngine:
     """Erweiterte Playlist-Engine mit intelligenten Sortieralgorithmen für headless Backend"""
     
-    def __init__(self, presets_dir: str = "data/presets"):
-        self.presets_dir = presets_dir
-        self._ensure_presets_dir()
+    def __init__(self, presets_dir: Optional[str] = "data/presets"):
+        self.presets_dir = Path(presets_dir) if presets_dir else Path("data/presets")
+        if self.presets_dir:
+            self._ensure_presets_dir()
         
         # Standard-Presets
         self.default_presets = self._create_default_presets()

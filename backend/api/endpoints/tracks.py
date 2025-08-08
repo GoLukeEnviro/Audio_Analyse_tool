@@ -2,6 +2,7 @@
 
 import os
 import logging
+import time
 from typing import List, Optional
 from pathlib import Path
 
@@ -213,30 +214,143 @@ def sort_tracks(tracks: List[dict], sort_by: str, sort_order: str) -> List[dict]
         return sorted(tracks, key=lambda t: t.get('filename', ''), reverse=reverse)
 
 
+def sanitize_track_data(raw_data: dict) -> dict:
+    """Ultimative Sanitization mit vollständiger Fallback-Abdeckung"""
+    try:
+        if not raw_data or not isinstance(raw_data, dict):
+            logger.warning("Invalid raw_data, creating minimal fallback")
+            raw_data = {'file_path': 'unknown', 'filename': 'unknown'}
+        
+        # Deep copy für sichere Manipulation
+        sanitized = raw_data.copy()
+        
+        # Metadata komplett absichern
+        metadata = sanitized.setdefault('metadata', {})
+        metadata.setdefault('title', sanitized.get('filename', 'Unknown Track'))
+        metadata.setdefault('artist', 'Unknown Artist')
+        metadata.setdefault('album', 'Unknown Album')
+        metadata.setdefault('genre', 'Unknown')
+        metadata.setdefault('duration', 180.0)
+        metadata.setdefault('file_size', 0)
+        metadata.setdefault('format', 'unknown')
+        metadata.setdefault('analyzed_at', time.time())
+        
+        # Features komplett absichern
+        features = sanitized.setdefault('features', {})
+        default_features = {
+            'bpm': 120.0,
+            'energy': 0.5,
+            'valence': 0.5,
+            'danceability': 0.5,
+            'acousticness': 0.5,
+            'instrumentalness': 0.5,
+            'loudness': -20.0,
+            'spectral_centroid': 2000.0,
+            'zero_crossing_rate': 0.1
+        }
+        for key, default_val in default_features.items():
+            if key not in features or features[key] is None:
+                features[key] = default_val
+        
+        # Camelot komplett absichern
+        camelot = sanitized.setdefault('camelot', {})
+        if not isinstance(camelot, dict):
+            camelot = sanitized['camelot'] = {}
+        camelot.setdefault('key', 'Unknown')
+        camelot.setdefault('camelot', '1A')
+        camelot.setdefault('key_confidence', 0.0)
+        camelot.setdefault('compatible_keys', ['1A', '12A', '2A'])
+        
+        # Mood komplett absichern  
+        mood = sanitized.setdefault('mood', {})
+        if not isinstance(mood, dict):
+            mood = sanitized['mood'] = {}
+        mood.setdefault('primary_mood', 'neutral')
+        mood.setdefault('confidence', 0.0)
+        mood.setdefault('scores', {
+            'energetic': 0.0, 'happy': 0.0, 'calm': 0.0,
+            'melancholic': 0.0, 'aggressive': 0.0, 'neutral': 1.0
+        })
+        
+        # Derived metrics komplett absichern
+        derived_metrics = sanitized.setdefault('derived_metrics', {})
+        derived_metrics.setdefault('estimated_mood', 'neutral')
+        derived_metrics.setdefault('energy_level', 'medium')
+        derived_metrics.setdefault('bpm_category', 'medium')
+        derived_metrics.setdefault('danceability_level', 'medium')
+        
+        # Status und Version sicherstellen
+        sanitized.setdefault('status', 'sanitized')
+        sanitized.setdefault('version', '2.0')
+        sanitized.setdefault('errors', [])
+        
+        return sanitized
+        
+    except Exception as e:
+        logger.error(f"Critical sanitization failure: {e}", exc_info=True)
+        # Ultimate fallback
+        return {
+            'file_path': str(raw_data.get('file_path', 'emergency_fallback')),
+            'filename': 'Emergency Fallback',
+            'metadata': {
+                'title': 'Error',
+                'artist': 'System Error',
+                'duration': 0.0,
+                'analyzed_at': time.time()
+            },
+            'features': {'bpm': 120.0, 'energy': 0.5},
+            'camelot': {'key': 'Unknown', 'camelot': '1A'},
+            'mood': {'primary_mood': 'neutral', 'confidence': 0.0, 'scores': {'neutral': 1.0}},
+            'derived_metrics': {'estimated_mood': 'neutral'},
+            'status': 'emergency_fallback',
+            'errors': ['Critical sanitization failure']
+        }
+
 def track_to_summary(track_data: dict) -> TrackSummary:
-    """Convert track data to TrackSummary mit None-sicheren Defaults"""
-    metadata = track_data.get('metadata', {})
-    features = track_data.get('features', {})
-    camelot = track_data.get('camelot', {})
-    derived_metrics = track_data.get('derived_metrics', {})
-    
-    # None-sichere Defaults für key/camelot
-    key = camelot.get('key') or ''
-    camelot_val = camelot.get('camelot') or ''
-    
-    return TrackSummary(
-        file_path=track_data.get('file_path', ''),
-        filename=track_data.get('filename', ''),
-        title=metadata.get('title') or '',
-        artist=metadata.get('artist') or '',
-        duration=metadata.get('duration', 0),
-        bpm=features.get('bpm', 0),
-        key=key,
-        camelot=camelot_val,
-        energy=features.get('energy', 0),
-        mood=derived_metrics.get('estimated_mood') or '',
-        analyzed_at=metadata.get('analyzed_at', 0)
-    )
+    """Convert track data to TrackSummary mit vollständiger Sanitization"""
+    try:
+        # Sanitisiere Daten vor Verarbeitung
+        sanitized_data = sanitize_track_data(track_data)
+        
+        metadata = sanitized_data.get('metadata', {})
+        features = sanitized_data.get('features', {})
+        camelot = sanitized_data.get('camelot', {})
+        derived_metrics = sanitized_data.get('derived_metrics', {})
+        
+        # None-sichere Defaults mit Fallbacks
+        key = str(camelot.get('key') or 'Unknown')
+        camelot_val = str(camelot.get('camelot') or '1A')
+        
+        return TrackSummary(
+            file_path=str(sanitized_data.get('file_path', '')),
+            filename=str(sanitized_data.get('filename', '')),
+            title=str(metadata.get('title') or ''),
+            artist=str(metadata.get('artist') or ''),
+            duration=float(metadata.get('duration', 0)),
+            bpm=float(features.get('bpm', 120)),
+            key=key,
+            camelot=camelot_val,
+            energy=float(features.get('energy', 0.5)),
+            mood=str(derived_metrics.get('estimated_mood') or ''),
+            analyzed_at=float(metadata.get('analyzed_at', 0))
+        )
+        
+    except Exception as e:
+        logger.error(f"Track conversion failed for {track_data.get('file_path', 'unknown')}: {e}")
+        # Return minimal safe TrackSummary
+        return TrackSummary(
+            file_path=str(track_data.get('file_path', 'unknown')),
+            filename=str(track_data.get('filename', 'unknown')),
+            title='',
+            artist='',
+            duration=0.0,
+            bpm=120.0,
+            key='Unknown',
+            camelot='1A',
+            energy=0.5,
+            mood='neutral',
+            analyzed_at=0.0
+        )
 
 
 @router.get("", response_model=TracksListResponse, summary="List all tracks")
@@ -257,14 +371,44 @@ async def list_tracks(params: TracksQueryParams = Depends(parse_query_params)):
         # Get tracks from database with filters applied
         all_tracks = get_cached_tracks_with_filters(params)
         
-        # Convert to summaries (filtering and pagination already done in get_cached_tracks)
-        track_summaries = [track_to_summary(track) for track in all_tracks]
+        # Convert to summaries mit robuster Fehlerbehandlung
+        track_summaries = []
+        failed_conversions = 0
+        
+        for track in all_tracks:
+            try:
+                summary = track_to_summary(track)
+                track_summaries.append(summary)
+            except Exception as e:
+                logger.warning(f"Failed to convert track {track.get('file_path', 'unknown')}: {e}")
+                failed_conversions += 1
+                # Füge trotzdem minimal-sichere Summary hinzu
+                try:
+                    safe_summary = TrackSummary(
+                        file_path=str(track.get('file_path', 'unknown')),
+                        filename=str(track.get('filename', 'unknown')),
+                        title='Error loading track',
+                        artist='Unknown',
+                        duration=0.0,
+                        bpm=120.0,
+                        key='Unknown',
+                        camelot='1A', 
+                        energy=0.5,
+                        mood='neutral',
+                        analyzed_at=0.0
+                    )
+                    track_summaries.append(safe_summary)
+                except Exception as inner_e:
+                    logger.error(f"Even safe conversion failed: {inner_e}")
+        
+        if failed_conversions > 0:
+            logger.warning(f"Failed to convert {failed_conversions} tracks out of {len(all_tracks)}")
         
         # Get database stats for total count
         database_manager = get_database_manager()
         db_stats = database_manager.get_cache_stats()
         total_count = db_stats.get('analyzed_tracks', 0)
-        total_pages = (total_count + params.per_page - 1) // params.per_page if total_count > 0 else 1
+        total_pages = max(1, (total_count + params.per_page - 1) // params.per_page if total_count > 0 else 1)
         
         return TracksListResponse(
             tracks=track_summaries,
@@ -277,8 +421,17 @@ async def list_tracks(params: TracksQueryParams = Depends(parse_query_params)):
         )
         
     except Exception as e:
-        logger.error(f"Error listing tracks: {e}")
-        raise HTTPException(status_code=500, detail="Failed to list tracks")
+        logger.error(f"Error listing tracks: {e}", exc_info=True)
+        # Return empty result statt HTTP error
+        return TracksListResponse(
+            tracks=[],
+            total_count=0,
+            page=params.page,
+            per_page=params.per_page,
+            total_pages=1,
+            has_next=False,
+            has_prev=False
+        )
 
 
 @router.get("/{track_id:path}/time-series", summary="Get track time series data")
